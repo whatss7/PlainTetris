@@ -497,10 +497,14 @@ function pauseGame() {
 var vBtnShown = false
 
 function showVirtualBtns() {
-    var vBtn = '<input type="button" onclick="requestUp()" value="&uarr;" style="width:50px;height:50px"/>\n<br/>\n' +
-        '<input type="button" onclick="requestLeft()" value="&larr;" style="width:50px;height:50px"/>\n' +
-        '<input type="button" onclick="requestDown()" value="&darr;" style="width:50px;height:50px"/>\n' +
-        '<input type="button" onclick="requestRight()" value="&rarr;" style="width:50px;height:50px"/>'
+    var vBtn =
+        '<input type="button" onclick="startGame()" value="S" style="width:150px;height:150px;font-size:40px"/>\n' +
+        '<input type="button" onclick="requestUp()" value="&uarr;" style="width:150px;height:150px;font-size:40px"/>\n' +
+        '<input type="button" onclick="pauseGame()" value="P" style="width:150px;height:150px;font-size:40px"/>\n' +
+        '<br/>\n' +
+        '<input type="button" onclick="requestLeft()" value="&larr;" style="width:150px;height:150px;font-size:40px"/>\n' +
+        '<input type="button" onclick="requestDown()" value="&darr;" style="width:150px;height:150px;font-size:40px"/>\n' +
+        '<input type="button" onclick="requestRight()" value="&rarr;" style="width:150px;height:150px;font-size:40px"/>'
     if (vBtnShown) {
         document.getElementById("btnBox").innerHTML = ""
         vBtnShown = false
