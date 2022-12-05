@@ -282,6 +282,7 @@ function genNextBlock() {
             if (board[i][j] != 0) {
                 GameFailed = true
                 GameStopped = true
+                document.getElementById("startBtn").value = "Start"
                 break
             }
         }
@@ -312,6 +313,17 @@ function initBoard() {
         }
         board.push(arr)
     }
+}
+
+function initGame() {
+    initBoard()
+    currentBlock = []
+    nextBlock = []
+    requestQueue = []
+    line = 0
+    score = 0
+    genNextBlock()
+    genNextBlock()
 }
 
 // 1 left 2 right 3 up 4 down 5 auto-down
@@ -447,9 +459,9 @@ function tryRotate() {
 
 function startGame() {
     GameStopped = false
-    initBoard()
-    genNextBlock()
-    genNextBlock()
+    document.getElementById("startBtn").value = "Retry"
+    document.getElementById("pauseBtn").value = "Pause"
+    initGame()
     requestQueue = []
     clearInterval(timer1)
     clearInterval(timer2)
@@ -493,11 +505,13 @@ window.onload = function init() {
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0.9, 0.9, 0.9, 1.0);    //Background Color
 
-    startGame()
+    initBoard()
+    draw()
 };
 
 document.onkeydown = function keydown(evt) {
     //console.log(evt.key)
+    if(GameStopped) return
     switch (evt.key) {
         case "ArrowUp":
             requestQueue.push(3)
