@@ -1,4 +1,4 @@
-# Naive Tetris
+# Plain Tetris
 
 This is a simple Tetris program based on WebGL.
 
