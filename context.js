@@ -10,6 +10,10 @@ var GameFailed = false
 
 var timer1, timer2
 
+var globalScale = 1
+var mobileScale = 1
+var currentScale = 1
+
 //#region Constants
 
 var d_colors = [
@@ -66,6 +70,9 @@ var blocks = [
 var scores = [0, 100, 200, 400, 800]
 
 var initPos = [3, 3, 3, 3, 3, 3, 3]
+
+var canvasWidth = 500
+var canvasHeight = 600
 
 //#endregion
 
@@ -224,6 +231,21 @@ function render() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, vertices.length);
 }
+
+function setCanvas() {
+    var canvas = document.getElementById("gl-canvas");
+
+    canvas.width = Math.floor(canvasWidth * currentScale);
+    canvas.height = Math.floor(canvasHeight * currentScale);
+
+    gl = WebGLUtils.setupWebGL(canvas);
+    if (!gl) {
+        alert("WebGL isn't available");
+    }
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.9, 0.9, 0.9, 1.0);    //Background Color
+}
 //#endregion
 
 //#region Logics
@@ -235,7 +257,7 @@ function genNextBlock() {
     var blockSize = blocks[id].length
     currentBlock = nextBlock
     nextBlock = []
-    // Transpose and flip (a.k.a rotate) the matrix to get the correct shape
+    // Transpose and flip (a.k.a. rotate) the matrix to get the correct shape
     for (var i = 0; i < blockSize; i++) {
         nextBlock.push([])
         for (var j = 0; j < blockSize; j++) {
@@ -498,21 +520,32 @@ function pauseGame() {
 var vBtnShown = false
 
 function showVirtualBtns() {
-    var vBtn =
-        '<input type="button" onclick="startGame()" value="S" style="width:150px;height:150px;font-size:40px"/>\n' +
-        '<input type="button" onclick="requestUp()" value="&uarr;" style="width:150px;height:150px;font-size:40px"/>\n' +
-        '<input type="button" onclick="pauseGame()" value="P" style="width:150px;height:150px;font-size:40px"/>\n' +
-        '<br/>\n' +
-        '<input type="button" onclick="requestLeft()" value="&larr;" style="width:150px;height:150px;font-size:40px"/>\n' +
-        '<input type="button" onclick="requestDown()" value="&darr;" style="width:150px;height:150px;font-size:40px"/>\n' +
-        '<input type="button" onclick="requestRight()" value="&rarr;" style="width:150px;height:150px;font-size:40px"/>'
+
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    draw();
+
+    vBtnShown = !vBtnShown;
+
+    currentScale = vBtnShown ? mobileScale : globalScale;
+
+    var btnSize = "" + Math.floor(120 * currentScale)
+    var fontSize = "" + Math.floor(40 * currentScale)
+
     if (vBtnShown) {
-        document.getElementById("btnBox").innerHTML = ""
-        vBtnShown = false
-    } else {
+        var vBtn =
+            '<input type="button" onclick="startGame()" value="S" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" onclick="requestUp()" value="&uarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" onclick="pauseGame()" value="P" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<br/>\n' +
+            '<input type="button" onclick="requestLeft()" value="&larr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" onclick="requestDown()" value="&darr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" onclick="requestRight()" value="&rarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>'
         document.getElementById("btnBox").innerHTML = vBtn
-        vBtnShown = true
+    } else {
+        document.getElementById("btnBox").innerHTML = ""
     }
+    setCanvas()
+    draw()
 }
 
 function requestUp() {
@@ -534,18 +567,25 @@ function requestRight() {
 
 window.onload = function init() {
 
-    var canvas = document.getElementById("gl-canvas");
+    var windowWidth = window.innerWidth
+        || document.documentElement.clientWidth
+        || document.body.clientWidth;
 
-    gl = WebGLUtils.setupWebGL(canvas);
-    if (!gl) {
-        alert("WebGL isn't available");
-    }
+    var windowHeight = window.innerHeight
+        || document.documentElement.clientHeight
+        || document.body.clientHeight;
 
-    //  Configure WebGL
+    if (windowWidth < 500 || windowHeight < 700) {
+        globalScale = Math.min(windowWidth / 500, windowHeight / 600);
+    } else globalScale = 1
 
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.9, 0.9, 0.9, 1.0);    //Background Color
+    if (windowWidth < 500 || windowHeight < 1000) {
+        mobileScale = Math.min(windowWidth / 500, windowHeight / 1000);
+    } else mobileScale = 1
 
+    currentScale = globalScale
+
+    setCanvas()
     initBoard()
     draw()
 };
