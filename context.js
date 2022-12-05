@@ -493,7 +493,42 @@ function pauseGame() {
 }
 //#endregion
 
+//#region Mobile Compability
+var vBtnShown = false
+
+function showVirtualBtns() {
+    var vBtn = '<input type="button" onclick="requestUp()" value="&uarr;" style="width:50px;height:50px"/>\n<br/>\n' +
+        '<input type="button" onclick="requestLeft()" value="&larr;" style="width:50px;height:50px"/>\n' +
+        '<input type="button" onclick="requestDown()" value="&darr;" style="width:50px;height:50px"/>\n' +
+        '<input type="button" onclick="requestRight()" value="&rarr;" style="width:50px;height:50px"/>'
+    if (vBtnShown) {
+        document.getElementById("btnBox").innerHTML = ""
+        vBtnShown = false
+    } else {
+        document.getElementById("btnBox").innerHTML = vBtn
+        vBtnShown = true
+    }
+}
+
+function requestUp() {
+    requestQueue.push(3)
+}
+
+function requestDown() {
+    requestQueue.push(4)
+}
+
+function requestLeft() {
+    requestQueue.push(1)
+}
+
+function requestRight() {
+    requestQueue.push(2)
+}
+//#endregion
+
 window.onload = function init() {
+
     var canvas = document.getElementById("gl-canvas");
 
     gl = WebGLUtils.setupWebGL(canvas);
@@ -512,19 +547,19 @@ window.onload = function init() {
 
 document.onkeydown = function keydown(evt) {
     //console.log(evt.key)
-    if(GameStopped) return
+    if (GameStopped) return
     switch (evt.key) {
         case "ArrowUp":
-            requestQueue.push(3)
+            requestUp()
             break
         case "ArrowDown":
-            requestQueue.push(4)
+            requestDown()
             break
         case "ArrowLeft":
-            requestQueue.push(1)
+            requestLeft()
             break
         case "ArrowRight":
-            requestQueue.push(2)
+            requestRight()
             break
     }
 }
