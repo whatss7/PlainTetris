@@ -235,6 +235,7 @@ function genNextBlock() {
     var blockSize = blocks[id].length
     currentBlock = nextBlock
     nextBlock = []
+    // Transpose and flip (a.k.a rotate) the matrix to get the correct shape
     for (var i = 0; i < blockSize; i++) {
         nextBlock.push([])
         for (var j = 0; j < blockSize; j++) {
