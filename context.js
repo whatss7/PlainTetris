@@ -323,6 +323,7 @@ function initGame() {
     requestQueue = []
     line = 0
     score = 0
+    GameFailed = false
     genNextBlock()
     genNextBlock()
 }
