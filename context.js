@@ -7,6 +7,7 @@ var line = 0
 var score = 0
 var GameStopped = false
 var GameFailed = false
+var resetTimerScheduled = false
 
 var timer1, timer2
 
@@ -353,7 +354,6 @@ function initGame() {
 // 1 left 2 right 3 up 4 down 5 auto-down
 function calcNext() {
     if (GameStopped) return
-    // while (mutex) { }
     requestQueue.forEach(i => {
         if (i == 1) {
             tryMove(-1, 0)
@@ -362,8 +362,12 @@ function calcNext() {
         } else if (i == 3) {
             tryRotate()
         } else if (i == 4) {
-            tryMove(0, -1)
-        } else if (i == 5) {
+            if (tryMove(0, -1)) {
+                resetTimerScheduled = true
+            } else {
+                genNextBlock()
+            }
+        } else if(i == 5) {
             if (!tryMove(0, -1)) {
                 genNextBlock()
             }
@@ -372,6 +376,10 @@ function calcNext() {
     });
     requestQueue = []
     draw()
+    if(resetTimerScheduled){
+        resetTimerScheduled = false;
+        setTimer();
+    }
 }
 
 function tryMove(dx, dy) {
@@ -481,12 +489,7 @@ function tryRotate() {
     return result
 }
 
-function startGame() {
-    GameStopped = false
-    document.getElementById("startBtn").value = "Retry"
-    document.getElementById("pauseBtn").value = "Pause"
-    initGame()
-    requestQueue = []
+function setTimer() {
     clearInterval(timer1)
     clearInterval(timer2)
     timer1 = setInterval(calcNext, 100);
@@ -495,23 +498,31 @@ function startGame() {
     }, 1000);
 }
 
+function clearTimer() {
+    clearInterval(timer1)
+    clearInterval(timer2)
+}
+
+function startGame() {
+    GameStopped = false
+    document.getElementById("startBtn").value = "Retry"
+    document.getElementById("pauseBtn").value = "Pause"
+    initGame()
+    setTimer()
+    requestQueue = []
+}
+
 function pauseGame() {
     if (GameStopped) {
         if (GameFailed) return
         GameStopped = false
         document.getElementById("pauseBtn").value = "Pause"
         requestQueue = []
-        clearInterval(timer1)
-        clearInterval(timer2)
-        timer1 = setInterval(calcNext, 100);
-        timer2 = setInterval(() => {
-            requestQueue.push(5)
-        }, 1000);
+        setTimer()
     } else {
         GameStopped = true
         document.getElementById("pauseBtn").value = "Unpause"
-        clearInterval(timer1)
-        clearInterval(timer2)
+        clearTimer()
     }
 }
 //#endregion
@@ -549,18 +560,22 @@ function showVirtualBtns() {
 }
 
 function requestUp() {
+    if (GameStopped) return
     requestQueue.push(3)
 }
 
 function requestDown() {
+    if (GameStopped) return
     requestQueue.push(4)
 }
 
 function requestLeft() {
+    if (GameStopped) return
     requestQueue.push(1)
 }
 
 function requestRight() {
+    if (GameStopped) return
     requestQueue.push(2)
 }
 //#endregion
@@ -591,8 +606,6 @@ window.onload = function init() {
 };
 
 document.onkeydown = function keydown(evt) {
-    //console.log(evt.key)
-    if (GameStopped) return
     switch (evt.key) {
         case "ArrowUp":
             requestUp()
