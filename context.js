@@ -608,16 +608,16 @@ window.onload = function init() {
 document.onkeydown = function keydown(evt) {
     switch (evt.key) {
         case "ArrowUp":
-            requestUp()
-            break
+            requestUp();
+            break;
         case "ArrowDown":
-            requestDown()
-            break
+            requestDown();
+            break;
         case "ArrowLeft":
-            requestLeft()
-            break
+            requestLeft();
+            break;
         case "ArrowRight":
-            requestRight()
-            break
+            requestRight();
+            break;
     }
 }
