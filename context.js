@@ -25,7 +25,8 @@ var d_colors = [
     [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
     [0.0, 0.5, 0.5],
-    [0.5, 0.0, 1.0]
+    [0.5, 0.0, 1.0],
+    [0.1, 0.1, 0.1]
 ]
 
 var blocks = [
@@ -149,6 +150,8 @@ var vertices = []
 var colors = []
 
 function drawBoard() {
+    var shadowBoard = board;
+    if(!GameFailed) shadowBoard = getShadowBoard();
     for (var i = 0; i < 10; i++) {
         for (var j = 0; j < 20; j++) {
             vertices.push([0.12 * i - 1.0, 0.1 * j - 1.0]);
@@ -158,7 +161,7 @@ function drawBoard() {
             vertices.push([0.12 * i - 1.0, 0.1 * (j + 1) - 1.0]);
             vertices.push([0.12 * (i + 1) - 1.0, 0.1 * j - 1.0]);
             for (var k = 0; k < 6; k++) {
-                colors.push(d_colors[board[i][j]])
+                colors.push(d_colors[shadowBoard[i][j]])
             }
         }
     }
@@ -251,7 +254,6 @@ function setCanvas() {
 
 //#region Logics
 var cx, cy  //position of current block
-var rotateCount
 
 function genNextBlock() {
     var id = Math.floor(Math.random() * 7)
@@ -268,7 +270,6 @@ function genNextBlock() {
     cx = 3
     cy = 20
 
-    rotateCount = 0
     var clearedLines = []
 
     // Test if any lines can be cleared
@@ -367,7 +368,7 @@ function calcNext() {
             } else {
                 genNextBlock()
             }
-        } else if(i == 5) {
+        } else if (i == 5) {
             if (!tryMove(0, -1)) {
                 genNextBlock()
             }
@@ -376,20 +377,29 @@ function calcNext() {
     });
     requestQueue = []
     draw()
-    if(resetTimerScheduled){
+    if (resetTimerScheduled) {
         resetTimerScheduled = false;
         setTimer();
     }
 }
 
-function tryMove(dx, dy) {
-    // Calculate the new position of the block
-    var ncx = cx + dx, ncy = cy + dy
-    var result = true
+function testBlockPlace(newBlock, x, y) {
+    var blockSize = newBlock.length;
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (newBlock[i][j] != 0) {
+                var ni = x + i, nj = y + j
+                if (ni < 0 || nj < 0 || ni >= 10 || nj >= 25 || board[ni][nj] != 0) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
 
+function deleteCurrentFromBoard() {
     var blockSize = currentBlock.length
-
-    // Delete previous block from board
     for (var i = 0; i < blockSize; i++) {
         for (var j = 0; j < blockSize; j++) {
             if (currentBlock[i][j] != 0) {
@@ -397,96 +407,89 @@ function tryMove(dx, dy) {
             }
         }
     }
+}
 
-    // Test if the new position fit into board
+function addBlockToBoard(prevBoard, block, x, y) {
+    var blockSize = block.length
     for (var i = 0; i < blockSize; i++) {
         for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                var ni = ncx + i, nj = ncy + j
-                if (ni < 0 || nj < 0 || ni >= 10 || nj >= 25 || board[ni][nj] != 0) {
-                    result = false
-                    break
-                }
-            }
-        }
-        if (!result) break
-    }
-
-    // If test succeed then move the block
-    if (result) {
-        cx = ncx
-        cy = ncy
-    }
-
-    // Put the block back to board in new position
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                board[cx + i][cy + j] = currentBlock[i][j]
+            if (block[i][j] != 0) {
+                prevBoard[x + i][y + j] = block[i][j]
             }
         }
     }
+}
+
+function addCurrentToBoard() { addBlockToBoard(board, currentBlock, cx, cy); }
+
+function rotateClockwise(block) {
+    var newBlock = []
+    var blockSize = block.length
+
+    for (var i = 0; i < blockSize; i++) {
+        newBlock.push([])
+        for (var j = 0; j < blockSize; j++) {
+            newBlock[i].push(block[blockSize - 1 - j][i])
+        }
+    }
+    return newBlock;
+}
+
+function tryMove(dx, dy) {
+    // Calculate the new position of the block
+    var ncx = cx + dx, ncy = cy + dy
+
+    deleteCurrentFromBoard()
+    var result = testBlockPlace(currentBlock, ncx, ncy);
+    if (result) { cx = ncx, cy = ncy; }
+    addCurrentToBoard()
 
     return result
 }
 
 function tryRotate() {
     // Calculate the new shape of the block
-    var result = true
-    var newBlock = []
+    var newBlock = rotateClockwise(currentBlock);
 
-    var blockSize = currentBlock.length
-
-    for (var i = 0; i < blockSize; i++) {
-        var arr = []
-        for (var j = 0; j < blockSize; j++) {
-            arr.push(currentBlock[blockSize - 1 - j][i])
-        }
-        newBlock.push(arr)
-    }
-
-    rotateCount = (rotateCount + 1) % 4
-
-    // Delete previous block from board
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                board[cx + i][cy + j] = 0
-            }
-        }
-    }
-
-    // Test if the new position fit into board
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (newBlock[i][j] != 0) {
-                var ni = cx + i, nj = cy + j
-                if (ni < 0 || nj < 0 || ni >= 10 || nj >= 25 || board[ni][nj] != 0) {
-                    result = false
-                    break
-                }
-            }
-        }
-        if (!result) break
-    }
-
-    // If test succeed then move the block
-    if (result) {
-        //console.log(currentBlock)
-        //console.log(newBlock)
-        currentBlock = newBlock
-    }
-
-    // Put the block back to board in new position
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                board[cx + i][cy + j] = currentBlock[i][j]
-            }
-        }
-    }
+    deleteCurrentFromBoard()
+    var result = testBlockPlace(newBlock, cx, cy);
+    if (result) { currentBlock = newBlock; }
+    addCurrentToBoard()
 
     return result
+}
+
+function copyMatrix(dst, src) {
+    for (var i = 0; i < src.length; i++) {
+        dst.push([])
+        for (var j = 0; j < src[i].length; j++) {
+            dst[i].push(src[i][j])
+        }
+    }
+}
+
+function getShadowBoard() {
+    var result = []
+    var shadowBlock = []
+    copyMatrix(result, board)
+    copyMatrix(shadowBlock, currentBlock)
+    var blockSize = currentBlock.length
+    if(blockSize == 0) return result;
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (shadowBlock[i][j] != 0) {
+                shadowBlock[i][j] = 8;
+            }
+        }
+    }
+    deleteCurrentFromBoard();
+    var maxDownDistance = 0;
+    for (; testBlockPlace(shadowBlock, cx, cy - maxDownDistance); maxDownDistance++);
+    maxDownDistance--;
+    addCurrentToBoard();
+    addBlockToBoard(result, shadowBlock, cx, cy - maxDownDistance);
+    addBlockToBoard(result, currentBlock, cx, cy);
+    return result;
 }
 
 function setTimer() {
@@ -590,19 +593,22 @@ window.onload = function init() {
         || document.documentElement.clientHeight
         || document.body.clientHeight;
 
-    if (windowWidth < 500 || windowHeight < 700) {
-        globalScale = Math.min(windowWidth / 500, windowHeight / 600);
-    } else globalScale = 1
+    var stdWidth = 550, stdHeight = 700;
+    var mobileWidth = 550, mobileHeight = 1000;
 
-    if (windowWidth < 500 || windowHeight < 1000) {
-        mobileScale = Math.min(windowWidth / 500, windowHeight / 1000);
-    } else mobileScale = 1
+    if (windowWidth < stdWidth || windowHeight < stdHeight) {
+        globalScale = Math.min(windowWidth / stdWidth, windowHeight / stdHeight);
+    } else globalScale = 1;
 
-    currentScale = globalScale
+    if (windowWidth < mobileWidth || windowHeight < mobileHeight) {
+        mobileScale = Math.min(windowWidth / mobileWidth, windowHeight / mobileHeight);
+    } else mobileScale = 1;
 
-    setCanvas()
-    initBoard()
-    draw()
+    currentScale = globalScale;
+
+    setCanvas();
+    initBoard();
+    draw();
 };
 
 document.onkeydown = function keydown(evt) {
