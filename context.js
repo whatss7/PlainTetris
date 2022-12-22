@@ -609,6 +609,8 @@ window.onload = function init() {
     setCanvas();
     initBoard();
     draw();
+
+    if(windowWidth < windowHeight) showVirtualBtns();
 };
 
 document.onkeydown = function keydown(evt) {
