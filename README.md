@@ -1,5 +1,7 @@
 # Plain Tetris
 
+[Try it out! This supports mobile device too!](https://whatss7.github.io/PlainTetris/)
+
 This is a simple Tetris program based on WebGL.
 
 This tetris follows Standard Rotation System without Wall Kicks.
