@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta name="viewport"
+		content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=2.0, user-scalable=yes"
+		charset="UTF-8" />
+    <title>速刷</title>    
+    <style type="text/css">
+        .vertical_list {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            margin: 10px 0px
+        }
+
+        .vertical_list input[type="button"] {
+            width: 100%;
+            margin: 5px;
+        }
+    </style>
+    <script type="text/javascript" src="learn-context.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+</head>
+
+<body>
+	<div style="margin: 0 auto; text-align: center; max-width: 500px">
+        <div class="vertical_list">
+            <input type="button" value="开始" onclick="start()"/>
+        </div>
+        <p id="status_text">待学习：0 / 待复习：0</p>
+        <p id="question_count_text">这是第?次做本题</p>
+        <p id="question_text">这里会有题目...</p>
+        <div class="vertical_list">
+            <input type="button" value="这是第一个答案" id="choose_btn1" onclick="choice(0)" disabled/>
+            <input type="button" value="这是第二个答案" id="choose_btn2" onclick="choice(1)" disabled/>
+            <input type="button" value="这是第三个答案" id="choose_btn3" onclick="choice(2)" disabled/>
+            <input type="button" value="这是第四个答案" id="choose_btn4" onclick="choice(3)" disabled/>
+        </div>
+        <p id="result_text"></p>
+        <div class="vertical_list">
+            <input type="button" value="下一题" id="next_btn" onclick="next()" disabled/>
+        </div>
+    </div>
+</body>
+
+</html>
