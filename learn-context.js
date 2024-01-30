@@ -403,7 +403,7 @@ var questions = [
         type: "choice",
         content: "第一代计算机的电子器件是（ ）。",
         choices: ['电子管', '晶体管', '中小规模集成电路', '大规模集成电路'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -411,15 +411,15 @@ var questions = [
         type: "choice",
         content: "地震对人们的生产和生活会产生一定的破坏力。目前，科学家利用计算机在地震预测方面的研究取得了一定进展，相信未来有效地预测地震将成为可能，计算机在地震预测研究中的应用属于（ ）。",
         choices: ['科学计算', '数据处理', '自动控制', '计算机辅助设计'],
-        answer: 2,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "-27的补码是（ ）。",
+        content: "-27的补码是（ ）B。",
         choices: ['11100100', '11101101', '11100110', '11100101'],
-        answer: 0,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -427,7 +427,7 @@ var questions = [
         type: "choice",
         content: "不同的汉字，下列选项中相同的是（ ）。",
         choices: ['对应的机内码', '32*32点阵形成字形码所占存储空间', '对应的国标码', '对应的区位码'],
-        answer: 3,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -435,15 +435,15 @@ var questions = [
         type: "choice",
         content: "八进制数51转换为二进制数是（ ）。",
         choices: ['100001', '100011', '100101', '101001'],
-        answer: 2,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "十进制数-105的反码是（ ）。",
+        content: "十进制数-105的反码是（ ）B。",
         choices: ['11101001', '10010111', '10010110', '00010111'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -451,7 +451,7 @@ var questions = [
         type: "choice",
         content: "常说的某计算机内存是2GB，就是指它的容量为（ ）字节。",
         choices: ['2×1024×1024×1024', '2×1000×1000×1000', '2×1024×1024', '2×1000×1000'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -465,9 +465,9 @@ var questions = [
     },
     {
         type: "choice",
-        content: "在计算机中，数据存储的基本单位是（ ）。",
+        content: "在计算机中，数据存储的基本单位是（）。",
         choices: ['字符', '字节', '字长', '二进制位'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -481,17 +481,17 @@ var questions = [
     },
     {
         type: "choice",
-        content: "下列关于计算机的描述中，正确的是（ ）。",
+        content: "下列关于计算机的描述中，正确的是（）。",
         choices: ['计算机的外部设备包括存储器、输入设备、输出设备', 'CPU 可以直接读取RAM中的信息', 'CPU处理信息的结果直接通过显示器显示，供用户直观地看到', 'CMOS具有开机自检功能'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "下列计算机的性能指标中，决定计算机运算精度的是（ ）。",
+        content: "下列计算机的性能指标中，决定计算机运算精度的是（）。",
         choices: ['字长', '时钟主频', '存储容量', '运算速度'],
-        answer: 2,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -507,7 +507,7 @@ var questions = [
         type: "choice",
         content: "硬盘故障可以分为软故障和硬故障两类，下列属于硬故障的是（ ）。",
         choices: ['启动文件丢失', '分区表损坏', '扇区物理性损坏', '主引导记录损坏'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -515,7 +515,7 @@ var questions = [
         type: "choice",
         content: "计算机硬件系统的5大组成部分不包括（ ）。",
         choices: ['存储器', '输入设备', '控制器', '网络设备'],
-        answer: 1,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -523,7 +523,7 @@ var questions = [
         type: "choice",
         content: "某计算机的主要技术参数为“i9-13 600/3.0 G/16G/1 T/”，其中16G的含义为（ ）。",
         choices: ['CPU的运算速度为16GMIPS', 'CPU的时钟主频为16 GHz', '计算机的内存容量为16GB', '计算机的硬盘容量为16GB'],
-        answer: 0,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -539,7 +539,7 @@ var questions = [
         type: "choice",
         content: "字长是衡量计算机性能的一个重要指标，它是指 ）。",
         choices: ['地址总线的位数', '内存地址单元的位数', 'CPU一次能处理的二进制数的位数', 'CPU一次能处理的十进制数的位数'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -547,7 +547,7 @@ var questions = [
         type: "choice",
         content: "在CD光盘上标记有“CD-RW”字样，表明该光盘（ ）。",
         choices: ['只能写入一次，可以反复读出', '只能读出，不能写入', '只能写入，不能读出', '是可多次擦除型光盘'],
-        answer: 1,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -555,7 +555,7 @@ var questions = [
         type: "choice",
         content: "下列关于BIOS和CMOS的描述中，错误的是（ ）。",
         choices: ['BIOS存放在ROM中具有非易失性，断电后信息不会丢失', 'CMOS中存放着基本输入输出设备的驱动程序', 'BIOS是计算机软件最基础的部分，包含加载操作系统和CMOS设置等功能', 'CMOS存储器是易失性存储器'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -563,7 +563,7 @@ var questions = [
         type: "choice",
         content: "（ ）负责管理和控制计算机软硬件资源，是系统软件的核心。",
         choices: ['应用软件', '操作系统', '程序设计语言', '数据库管理系统'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -571,15 +571,15 @@ var questions = [
         type: "choice",
         content: "下列文件名中，正确的是（ ）。",
         choices: ['sad/jsjkhjkh/', 'YETG*DGHW', 'JDJSK.JFDSK.', 'DJD:jd[dewd]'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "下列（ ）编写的程序执行效率最高。",
+        content: "下列（）编写的程序执行效率最高。",
         choices: ['机器语言', '面向对象程序设计语言', '汇编语言', '自然语言'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -587,7 +587,7 @@ var questions = [
         type: "choice",
         content: "软件工程的三要素包括（ ）、方法和工具。",
         choices: ['进程', '过程', '作业', '程序'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -595,7 +595,7 @@ var questions = [
         type: "choice",
         content: "在输入文本的过程中，可按（ ）键在中文输入法和英文输入法之间进切换。",
         choices: ['Shift', 'Ctrl+Shift', 'Ctrl', 'Ctrl+空格'],
-        answer: 0,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -603,7 +603,7 @@ var questions = [
         type: "choice",
         content: "在Windows中，“记事本”的默认文件格式为（ ）。",
         choices: ['.txt', '.png', '.bmp', '.doc'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -611,7 +611,7 @@ var questions = [
         type: "choice",
         content: "在Windows中，下列关于快捷方式的描述中，正确的是（ ）。",
         choices: ['文档、图片、音频、视频等文件都可以创建快捷方式', '同一个文件夹中，对于同一个对象，只能创建一个快捷方式', '删除某一对象的所有快捷方式，就无法正常打开该对象，但该对象并未从计算机中删除', '将某对象放入回收站，不影响该对象快捷方式的正常使用'],
-        answer: 2,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -619,7 +619,7 @@ var questions = [
         type: "choice",
         content: "C 语言中的标识符只能由字母、数字和下划线3种字符组成，且第一个字符（ ）。",
         choices: ['必须为字母', '必须为下划线', '必须为字母或下划线', '可以是字母、数字或下划线'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -627,7 +627,7 @@ var questions = [
         type: "choice",
         content: "下列关于三层交换机的描述中，正确的是（ ）。",
         choices: ['工作在网络层的上一层', '是通过硬件实现高速路由功能的设备', '使用先进的路由处理软件提高速度', '使用在对网络管理和安全要求高的场合'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -635,7 +635,7 @@ var questions = [
         type: "choice",
         content: "在OSI/RM参考模型的传输层中，最重要的协议是（",
         choices: ['TCP和UDP', 'TCP和IP', 'HTTP 和FTP', 'TELNET 和DNS'],
-        answer: 2,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -643,7 +643,7 @@ var questions = [
         type: "choice",
         content: "下列应用程序中，基于TCP协议的是（ ）。",
         choices: ['ping', 'Telnet', 'OSPF', 'SNMP'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -651,7 +651,7 @@ var questions = [
         type: "choice",
         content: "设置局域网中计算机的网络属性时，“默认网关”应该设置为（ ）的内网地址。",
         choices: ['DNS服务器', 'Web 服务器', '路由器', '交换机'],
-        answer: 3,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -659,7 +659,7 @@ var questions = [
         type: "choice",
         content: "影响局域网特性的技术要素不包括（ ）。",
         choices: ['网络拓扑结构', '网络的介质访问控制方法', '网络的传输介质', '网络的布线方法'],
-        answer: 2,
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -667,7 +667,7 @@ var questions = [
         type: "choice",
         content: "IPv6地址 FE80:0:0:09A:FE:0:0:4CA2可以简写为（ ）。",
         choices: ['FE80::09A:FE:0:0:4CA2', 'FE80:0:0:9A:FE:0:0:4CA2', 'FE80::09A:FE::4CA2', 'FE80::9A:FE:0::4CA2'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -689,17 +689,17 @@ var questions = [
     },
     {
         type: "choice",
-        content: "在物理连接上属于星型网络，但在逻辑上属于总线型网络的通信设备是（ ）。",
+        content: "在物理连接上属于星型网络，但在逻辑上属于总线型网络的通信设备是（）。",
         choices: ['网关', '集线器', '交换机', '路由器'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "下列关于电子邮件的描述中，错误的是（ ）。",
+        content: "下列关于电子邮件的描述中，错误的是（）。",
         choices: ['电子邮件系统工作过程遵循“客户机/服务器”模式', '电子邮箱是在邮件系统中申请的一小块存储空间', '接收方计算机若处于离线状态邮件将丢失', '邮件发送协议遵循SMTP协议'],
-        answer: 1,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -707,7 +707,7 @@ var questions = [
         type: "choice",
         content: "IPv4地址由（ ）位二进制数组成。",
         choices: ['4', '16', '32', '128'],
-        answer: 1,
+        answer: 2,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -715,7 +715,7 @@ var questions = [
         type: "choice",
         content: "100 bps代表每秒传输（ ）。",
         choices: ['100 MB', '100 bit', '100 KB', '100 TB'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -723,7 +723,7 @@ var questions = [
         type: "choice",
         content: "下列设备中，属于资源子网的是（ ）。",
         choices: ['打印机', '集线器', '交换机', '路由器'],
-        answer: 3,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -731,7 +731,7 @@ var questions = [
         type: "choice",
         content: "在计算机网络中，通常采用（ ）技术来证明传送报文的真实性。",
         choices: ['明文', '数字签名', '防火墙', '密钥'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -755,23 +755,23 @@ var questions = [
         type: "choice",
         content: "下列关于系统更新的描述中，正确的是（ ）。",
         choices: ['系统更新后，便不会再受病毒的攻击', '系统更新可以修复操作系统漏洞', '系统更新只能从软件官方网站下载补丁包', '所有的更新应及时下载并安装，否则系统会立即崩溃'],
-        answer: 3,
-        mapping: [0, 1, 2, 3],
-        count: 0
-    },
-    {
-        type: "choice",
-        content: "多媒体个人计算机的英文缩写是（ ）。",
-        choices: ['CPU', 'DPC', 'MPC', 'PHP'],
-        answer: 0,
-        mapping: [0, 1, 2, 3],
-        count: 0
-    },
-    {
-        type: "choice",
-        content: "若图像的颜色深度为8，则支持的颜色数目有（ ）种。",
-        choices: ['8', '32', '128', '256'],
         answer: 1,
+        mapping: [0, 1, 2, 3],
+        count: 0
+    },
+    {
+        type: "choice",
+        content: "多媒体个人计算机的英文缩写是（）。",
+        choices: ['CPU', 'DPC', 'MPC', 'PHP'],
+        answer: 2,
+        mapping: [0, 1, 2, 3],
+        count: 0
+    },
+    {
+        type: "choice",
+        content: "若图像的颜色深度为8，则支持的颜色数目有（）种。",
+        choices: ['8', '32', '128', '256'],
+        answer: 3,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -779,15 +779,15 @@ var questions = [
         type: "choice",
         content: "通常防火墙建立在一个网络的（ ）。",
         choices: ['每个子网的内部', '内部网络与外部网络交叉点', '部分内部网络与外部网络的结合处', '内部子网之间传送信息的中枢'],
-        answer: 2,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
     },
     {
         type: "choice",
-        content: "电影画面的帧速率一般为（ ）fps。",
+        content: "电影画面的帧速率一般为（）fps。",
         choices: ['24', '25', '30', '31'],
-        answer: 2,
+        answer: 0,
         mapping: [0, 1, 2, 3],
         count: 0
     },
@@ -795,10 +795,10 @@ var questions = [
         type: "choice",
         content: "计算机中图像的分辨率指的是（ ）。",
         choices: ['屏幕上能够显示的像素数目', '图像单位长度上的像素个数', '用厘米表示的图像的实际尺寸大小', '图像包含的颜色数'],
-        answer: 0,
+        answer: 1,
         mapping: [0, 1, 2, 3],
         count: 0
-    }        
+    }    
 ];
 
 Array.prototype.shuffle = function() {
