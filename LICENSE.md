@@ -19,3 +19,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----
+Exception:
+
+The file `webgl-utils.js` is copyrighted 2010 Google Inc. and is licensed under
+the BSD-3-Clause License. See the header comments in that file for full license
+text and conditions.
+
+`initShaders()` and `flatten()` in `context.js`, modified from 
+[Edward Angel's demo](https://www.cs.unm.edu/~angel/WebGL/), is copyrighted 
+2012-2017 Ed Angel and Dave Shreiner and is licensed under the MIT License. 
+See [Corresponding License](https://www.cs.unm.edu/~angel/WebGL/CODE/license) 
+for more info.
