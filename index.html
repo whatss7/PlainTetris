@@ -25,7 +25,7 @@
     </script>
 
     <script type="text/javascript" src="webgl-utils.js"></script>
-    <script type="text/javascript" src="context.js"></script>
+    <script type="text/javascript" src="script.js"></script>
     
     <style type="text/css">
         .container {
@@ -37,8 +37,32 @@
             display: inline-block;
         }
 
-        #scene {
-            border: 1px solid black;
+        #statsPanel {
+            display: none;
+            position: fixed;
+            bottom: 8px;
+            right: 8px;
+            padding: 6px 10px;
+            background: #f4f4f4;
+            border: 1px solid #444;
+            font-family: monospace;
+            text-align: left;
+            max-width: min(92vw, 420px);
+            max-height: 60vh;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        #statsClose {
+            float: right;
+            margin-left: 12px;
+            padding: 0 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #configRow {
+            display: none;
         }
     </style>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
@@ -46,15 +70,57 @@
 
 <body>
     <div class="container">
-        <input id="startBtn" type="button" onclick="startGame()" value="Start"/>
-        <input id="pauseBtn" type="button" onclick="pauseGame()" value="Pause"/>
-        <input id="mobileBtn" type="button" onclick="showVirtualBtns()" value="Virtual Button (for mobile)"/>
-        <br/>
-        <p class="inline">Score:</p>
-        <p id="score" class="inline">0</p>
-        <p class="inline">Count:</p>
-        <p id="count" class="inline">0</p>
-        <p class="inline">&larr; &rarr; &darr;: Move &uarr;: Rotate</p>
+        <div id="buttonRow">
+            <input id="startBtn" type="button" onclick="startButtonAction()" value="Start"/>
+            <input id="pauseBtn" type="button" onclick="pauseGame()" value="Pause"/>
+            <input id="mobileBtn" type="button" onclick="showVirtualBtns()" value="Mobile Button"/>
+            <input id="statsBtn" type="button" onclick="toggleStats()" value="Stats"/>
+            <input id="configBtn" type="button" onclick="toggleConfig()" value="Config"/>
+        </div>
+        <div id="configRow">
+            <div>
+                <label>Randomizer:
+                    <select id="randomizerSelect" onchange="setRandomizer(this.value); this.blur()">
+                        <option value="7-bag" selected>7-bag</option>
+                        <option value="nes">NES</option>
+                        <option value="ctwc">CTWC</option>
+                        <option value="gb">Game Boy</option>
+                        <option value="sega">Sega</option>
+                        <option value="tgm">Arika TGM</option>
+                        <option value="tgm2">Arika TGM2</option>
+                        <option value="tgm3">Arika TGM3</option>
+                        <option value="uniform">Uniform</option>
+                        <option value="8-bag">8-bag</option>
+                        <option value="14-bag">14-bag</option>
+                        <option value="35-bag">35-bag</option>
+                    </select>
+                </label>
+                <a>|</a>
+                <label>Rotation System:
+                    <select id="rotationSystemSelect" onchange="setRotationSystem(this.value); this.blur()">
+                        <option value="srs" selected>SRS</option>
+                        <option value="nes">NES</option>
+                        <option value="gb">Game Boy</option>
+                        <option value="sega">Sega</option>
+                        <option value="arika">Arika</option>
+                        <option value="asrs">Arika SRS</option>
+                        <option value="t64">Tetris 64</option>
+                    </select>
+                </label>
+            </div>
+            <label><input type="checkbox" id="wallKickCheckbox" checked onchange="setWallKickEnabled(this.checked)"/> Enable Wall Kick</label>
+            <a>|</a>
+            <label><input type="checkbox" id="randomStartCheckbox" onchange="setRandomStart(this.checked)"/> Random Start</label>
+            <a>|</a>
+            <label>Seed: <input id="seedInput" type="text" size="12" placeholder="random"/></label>
+        </div>
+        <div id="scoreRow">
+            <p class="inline">Score:</p>
+            <p id="score" class="inline">0</p>
+            <p class="inline">Count:</p>
+            <p id="count" class="inline">0</p>
+            <p class="inline">&larr; &rarr; &darr;: Move &uarr;: Rotate</p>
+        </div>
     </div>
     <div class="container">
         <canvas id="gl-canvas" width="500" height="600">
@@ -62,6 +128,18 @@
         </canvas>
     </div>
     <div id="btnBox" class="container">
+    </div>
+    <div id="statsPanel">
+        <div id="statsClose" onclick="toggleStats()" title="Close stats">&times;</div>
+        <div id="statsMode"></div>
+        <div id="statsRandomizer"></div>
+        <div id="statsRotationSystem"></div>
+        <div id="statsScore"></div>
+        <div id="statsSeed"></div>
+        <div id="statsPieces"></div>
+        <div id="statsStreak"></div>
+        <div id="statsCounts"></div>
+        <div id="statsRate"></div>
     </div>
 </body>
 
