@@ -562,22 +562,6 @@ function createNesRandomizer() {
     };
 }
 
-// CTWC: Same as NES, but rolls 0-6 at first try.
-function createCtwcRandomizer() {
-    var last = -1;
-    return {
-        next: function () {
-            var id = Math.floor(gameRandom() * 7);
-            if (id === last) {
-                id = Math.floor(gameRandom() * 7);
-            }
-            last = id;
-            return id;
-        },
-        reset: function () { last = -1; }
-    };
-}
-
 // Game Boy: pieces are numbered with 3-bit vectors (L=0, J=1, I=2, O=3,
 // Z=4, S=5, T=6; 111 is unused). The first two pieces are fully random;
 // after that a candidate is rerolled while both it and the previous piece
@@ -846,7 +830,6 @@ function createSegaRandomizer() {
 var RANDOMIZERS = {
     "7-bag": function () { return createBagRandomizer(7); },
     "nes": createNesRandomizer,
-    "ctwc": createCtwcRandomizer,
     "gb": createGameBoyRandomizer,
     "sega": createSegaRandomizer,
     "tgm": createTgmRandomizer,
@@ -859,18 +842,17 @@ var RANDOMIZERS = {
 };
 
 var RANDOMIZER_NAMES = {
-    "uniform": "Uniform",
-    "nes": "NES",
-    "ctwc": "CTWC",
     "7-bag": "7-bag",
-    "8-bag": "8-bag",
-    "14-bag": "14-bag",
-    "35-bag": "35-bag",
+    "nes": "NES",
     "gb": "Game Boy",
     "sega": "Sega",
     "tgm": "Arika TGM",
     "tgm2": "Arika TGM2",
-    "tgm3": "Arika TGM3"
+    "tgm3": "Arika TGM3",
+    "uniform": "Uniform",
+    "8-bag": "8-bag",
+    "14-bag": "14-bag",
+    "35-bag": "35-bag",
 };
 
 // Randomizer used by the current game. It is read from the select when a game

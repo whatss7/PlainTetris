@@ -23,7 +23,6 @@ This tetris will not accelerate as game proceeds.
 | --- | --- |
 | N-bag | Bags of n pieces is shuffled and used in order; A new bag is generated when the last piece is used. |
 | NES | Rolls 0-7 for a piece; if the piece is the same as the previous one or the piece is dummy 7, it is rerolled in 0-6. |
-| CTWC | Same as NES, but the first roll is in 0-6 range. |
 | Game Boy | Pieces are compared as 3-bit vectors; a piece is rerolled while it and the previous piece are subsets of the one before (up to 3 draws). Piece distribution is not uniform. |
 | Sega | A 32-bit LCG generates a 1000-piece sequence from the seed; the sequence repeats every 1000 pieces. |
 | Arika TGM | First piece is I, J, L or T; up to 4 draws while the piece is in the last-4 history. |
