@@ -1,49 +1,81 @@
+/*
+ * Plain Tetris - single-file game script.
+ *
+ * Region layout:
+ *   Global state    - mutable state shared by everything below
+ *   Constants       - piece shapes, colours, scoring, canvas size, tick timing
+ *   Rotation System - wall kick tables, spawn states, rotation rules
+ *   Render          - WebGL setup, frame building and drawing
+ *   Randomizers     - piece sequence generators and their selection
+ *   Logics          - pieces and board, movement, the game loop and game flow
+ *   UI              - button, select and checkbox handlers
+ *   Stats           - statistics collection and the stats panel
+ *   Input           - action queue fed by the keyboard and touch controls
+ *   Mobile          - on-screen buttons and layout scaling
+ *   Bootstrap       - startup: sizing, initial draw, keyboard listener
+ */
+
+//#region Global state
+
+// WebGL context, shader program, buffers and attribute locations
 var gl;
 var program = null;
 var vBuffer = null;
 var cBuffer = null;
 var vPosition = -1;
 var vColor = -1;
+
+// Board, the falling piece and the preview piece
 var board = [];
 var currentBlock = [];
 var nextBlock = [];
+
+// Input queue and the state of the current session
 var requestQueue = [];
 var line = 0;
 var score = 0;
 var GameStopped = false;
 var GameFailed = false;
 var gameStarted = false;
-var resetTimerScheduled = false;
 
-var timer1, timer2;
+var cx, cy  // position of current block
 
+var currentRotationState = "0"; // 0: initial, R: clockwise, 2: 180 degrees, L: counter-clockwise
+var currentBlockType = "I"; // I, J, L, S, T, Z, O
+var nextBlockType = "I"; // I, J, L, S, T, Z, O
+
+// Random source used by the randomizers; swapped for a seeded one each game.
+var gameRandom = Math.random;
+var gameSeed = "";
+var seedRevealPending = false;
+var randomStartEnabled = false;
+
+// Timer: a single interval drives the whole game.
+var gameTimer = null;
+var dropTicks = 0;
+
+// Canvas scale factors for desktop and mobile layouts
 var globalScale = 1;
 var mobileScale = 1;
 var currentScale = 1;
 
+// Debug logging: gameLog() prints only while debugMode is on
 var debugMode = false;
-
 function gameLog(msg) {
     if (debugMode) {
         console.log(msg);
     }
 }
 
+//#endregion
+
 //#region Constants
 
-var d_colors = [
-    [0.0, 0.0, 0.0],
-    [1.0, 0.0, 0.0],
-    [1.0, 0.5, 0.0],
-    [1.0, 1.0, 0.0],
-    [0.0, 1.0, 0.0],
-    [0.0, 0.0, 1.0],
-    [0.0, 0.5, 0.5],
-    [0.5, 0.0, 1.0],
-    [0.2, 0.2, 0.2]
-];
+// Piece order used by blocks[], the randomizers and the stats counters
+var TYPES = ["I", "J", "L", "O", "S", "T", "Z"];
 
-var blocks = [
+// Tetrimino shapes in their initial orientation, indexed like TYPES
+var tetriminos = [
     [
         [0, 0, 0, 0],
         [1, 1, 1, 1],
@@ -83,15 +115,38 @@ var blocks = [
     ]
 ];
 
+// Cell colours; index 0 is the empty cell and 8 is the ghost piece
+var cellColors = [
+    [0.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [1.0, 0.5, 0.0],
+    [1.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 0.5, 0.5],
+    [0.5, 0.0, 1.0],
+    [0.2, 0.2, 0.2]
+];
+
+// Score awarded for clearing 0, 1, 2, 3 or 4 lines at once
 var scores = [0, 40, 100, 300, 1200];
 
+// Logical canvas size, scaled by currentScale in setCanvas()
 var canvasWidth = 500;
 var canvasHeight = 600;
+
+// Timing: one interval of TICK_MS drives input and gravity together; gravity
+// moves the piece every DROP_TICKS ticks, i.e. once per second.
+
+var TICK_RATE = 60;
+var TICK_MS = 1000 / TICK_RATE;
+var DROP_TICKS = 60;
 
 //#endregion
 
 //#region Rotation System
 
+// Combine a per-transition basic rotation offset with a list of kick offsets
 function makeWallKickTableFromBasicRotation(basicRotationTable, wallKickTable) {
     var newWallKickTable = {};
     for (var key in basicRotationTable) {
@@ -228,10 +283,11 @@ var wallKickT64_I = makeWallKickTableFromBasicRotation(basicRotationT64_I, t64Ki
 var wallKickT64_O = makeWallKickTableFromBasicRotation(basicRotationT64_O, t64KickTable);
 var wallKickT64_Default = makeWallKickTableFromBasicRotation(wallKickNone, t64KickTable);
 
+// Wall kick tables used by each rotation system
 var WALL_KICK_TABLES = {
     "srs": {
-        "O": wallKickNone,
         "I": wallKickSRS_I,
+        "O": wallKickNone,
         "default": wallKickSRS_JLSTZ
     },
     "nes": {
@@ -248,25 +304,25 @@ var WALL_KICK_TABLES = {
     },
     "sega": {
         "I": wallKickSega_I,
-        "S": wallKickGB_ISZ,
-        "Z": wallKickNES_ISZ,
         "J": wallKickSega_JLT,
         "L": wallKickSega_JLT,
+        "O": wallKickNone,
+        "S": wallKickGB_ISZ,
         "T": wallKickSega_JLT,
-        "default": wallKickNone
+        "Z": wallKickNES_ISZ
     },
     "arika": {
         "I": wallKickSega_I,
-        "S": wallKickArika_S,
-        "Z": wallKickArika_Z,
         "J": wallKickArika_JLT,
         "L": wallKickArika_JLT,
+        "O": wallKickNone,
+        "S": wallKickArika_S,
         "T": wallKickArika_JLT,
-        "default": wallKickNone
+        "Z": wallKickArika_Z
     },
     "asrs": {
-        "O": wallKickNone,
         "I": wallKickASRS_I,
+        "O": wallKickNone,
         "default": wallKickSRS_JLSTZ
     },
     "t64": {
@@ -276,6 +332,7 @@ var WALL_KICK_TABLES = {
     },
 };
 
+// Display names of the rotation systems
 var ROTATION_SYSTEM_NAMES = {
     "srs": "SRS",
     "nes": "NES",
@@ -286,6 +343,7 @@ var ROTATION_SYSTEM_NAMES = {
     "t64": "Tetris 64",
 };
 
+// System and wall kick setting used by the next game
 var gameRotationSystemName = "srs";
 var wallKickEnabled = true;
 
@@ -309,6 +367,43 @@ function getWallKickTable() {
     return tableSet["default"];
 }
 
+// Extra rules a system can apply once the first kick attempt has failed
+var ROTATION_RULES = {
+    // Arika RS "center column rule": the L/J/T 3x3 box is searched
+    // 123 / 456 / 789 (top row first, left to right) and the first cell where
+    // the rotated piece collides decides: a middle-column cell (2, 5 or 8)
+    // blocks the rotation, a side-column cell (or no collision) lets the
+    // remaining kicks run. It is evaluated only after the table's first
+    // offset (the system's basic rotation) has been tried and failed.
+    centerColumnRule: function (type, block, x, y) {
+        if (type !== "J" && type !== "L" && type !== "T") return false;
+        var size = block.length;
+        for (var j = size - 1; j >= 0; j--) {
+            for (var i = 0; i < size; i++) {
+                if (block[i][j] == 0) continue;
+                var bx = x + i, by = y + j;
+                var collides = bx < 0 || bx >= 10 || by < 0 || by >= 25 || board[bx][by] != 0;
+                if (collides) return i === 1;
+            }
+        }
+        return false;
+    }
+};
+
+var ROTATION_SYSTEM_RULES = {
+    "arika": ["centerColumnRule"]
+};
+
+function rotationRulesBlockKick(type, block, x, y) {
+    var rules = ROTATION_SYSTEM_RULES[gameRotationSystemName] || [];
+    for (var i = 0; i < rules.length; i++) {
+        var rule = ROTATION_RULES[rules[i]];
+        if (rule && rule(type, block, x, y)) return true;
+    }
+    return false;
+}
+
+// Spawn orientation per system: the rotation state a piece starts in
 var SPAWN_STATES = ["0", "R", "2", "L"];
 var SPAWN_STATES_BY_SYSTEM = {
     "srs": { "default": "0" },
@@ -329,23 +424,34 @@ function getSpawnState(type) {
 // Build a piece in its spawn orientation: the standard state 0 shape rotated
 // clockwise until it reaches the configured state.
 function makeBlockInSpawnState(type) {
-    var block = makeBlock(type);
+    var block = makeTetrimino(type);
     var steps = SPAWN_STATES.indexOf(getSpawnState(type));
     for (var i = 0; i < steps; i++) block = rotateClockwise(block);
     return block;
 }
 
-// Show/hide the settings row that holds the randomizer and rotation system selects.
-function toggleConfig() {
-    var btn = document.getElementById("configBtn");
-    if (btn && btn.disabled) return;
-    var row = document.getElementById("configRow");
-    if (!row) return;
-    row.style.display = (row.style.display === "block") ? "none" : "block";
+// Rotation state machine (0 -> R -> 2 -> L -> 0)
+function getRotationState() {
+    return currentRotationState;
 }
+
+function getNextRotationState(currentRotation) {
+    switch (currentRotation) {
+        case "0": return "R";
+        case "R": return "2";
+        case "2": return "L";
+        case "L": return "0";
+        default: return "0";
+    }
+}
+
 //#endregion
 
-//#region Render functions | draw()
+//#region Render
+
+// Per-frame geometry and colours, rebuilt by draw()
+var vertices = []
+var colors = []
 
 function initShaders(gl, vertexShaderId, fragmentShaderId) {
     var vertShader;
@@ -413,9 +519,7 @@ function flatten(v) {
     return result;
 }
 
-var vertices = []
-var colors = []
-
+// Build the vertex and colour arrays for the board (including the ghost piece)
 function drawBoard() {
     var shadowBoard = board;
     if(!GameFailed) shadowBoard = getShadowBoard();
@@ -428,12 +532,13 @@ function drawBoard() {
             vertices.push([0.12 * i - 1.0, 0.1 * (j + 1) - 1.0]);
             vertices.push([0.12 * (i + 1) - 1.0, 0.1 * j - 1.0]);
             for (var k = 0; k < 6; k++) {
-                colors.push(d_colors[shadowBoard[i][j]])
+                colors.push(cellColors[shadowBoard[i][j]])
             }
         }
     }
 }
 
+// Build the vertex and colour arrays for the next-piece preview
 function drawNext() {
     var blockSize = nextBlock.length
     var leftGap = Math.floor((5 - blockSize) / 2)
@@ -448,12 +553,13 @@ function drawNext() {
             for (var k = 0; k < 6; k++) {
                 if (i < leftGap || i >= leftGap + blockSize) colors.push([0, 0, 0])
                 else if (j < leftGap || j >= leftGap + blockSize) colors.push([0, 0, 0])
-                else colors.push(d_colors[nextBlock[i - leftGap][j - leftGap]])
+                else colors.push(cellColors[nextBlock[i - leftGap][j - leftGap]])
             }
         }
     }
 }
 
+// Upload both arrays to the GPU and draw the frame
 function draw() {
     if (!gl || !program) return;
 
@@ -493,6 +599,7 @@ function render() {
     gl.drawArrays(gl.TRIANGLES, 0, vertices.length);
 }
 
+// Size the canvas and (re)create the WebGL context, program and buffers
 function setCanvas() {
     var canvas = document.getElementById("gl-canvas");
 
@@ -532,16 +639,75 @@ function setCanvas() {
     vPosition = gl.getAttribLocation(program, "vPosition");
     vColor = gl.getAttribLocation(program, "vColor");
 }
+
 //#endregion
 
 //#region Randomizers
 
-var TYPES = ["I", "J", "L", "O", "S", "T", "Z"];
+// Seeded PRNG (xmur3 hash + mulberry32) so that one seed reproduces both the
+// piece sequence and the Random Start fill.
+function hashSeedString(text) {
+    var h = 1779033703 ^ text.length;
+    for (var i = 0; i < text.length; i++) {
+        h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
+        h = (h << 13) | (h >>> 19);
+    }
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^ (h >>> 16)) >>> 0;
+}
 
-function createUniformRandomizer() {
+function createSeededRandom(seedText) {
+    var a = hashSeedString(String(seedText)) || 1;
+    return function () {
+        a = (a + 0x6D2B79F5) | 0;
+        var t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+// Bag containing a number of copies of each of the seven pieces.
+function createBagRandomizer(size) {
+    var bag = [];
+
+    function refill() {
+        function shuffle(bag) {
+            for (var i = bag.length - 1; i > 0; i--) {
+                var j = Math.floor(gameRandom() * (i + 1));
+                var tmp = bag[i];
+                bag[i] = bag[j];
+                bag[j] = tmp;
+            }
+        }
+
+        bag = [];
+        var copies = Math.floor(size / 7);
+        for (var c = 0; c < copies; c++) {
+            for (var i = 0; i < TYPES.length; i++) {
+                bag.push(i);
+            }
+        }
+
+        var leftover = size - copies * 7;
+        var extra = [];
+        for (var i = 0; i < TYPES.length; i++) {
+            extra.push(i);
+        }
+        shuffle(extra);
+
+        for (var i = 0; i < leftover; i++) {
+            bag.push(extra[i]);
+        }
+        shuffle(bag);
+    }
+
     return {
-        next: function () { return Math.floor(gameRandom() * 7); },
-        reset: function () { }
+        next: function () {
+            if (bag.length === 0) refill();
+            return bag.pop();
+        },
+        reset: function () { bag = []; }
     };
 }
 
@@ -567,6 +733,7 @@ function createNesRandomizer() {
 // after that a candidate is rerolled while both it and the previous piece
 // are subsets of the piece before the previous one, up to three rolls.
 var gameBoyVectors = [2, 1, 0, 3, 5, 6, 4];
+
 function createGameBoyRandomizer() {
     var previous1 = -1;
     var previous2 = -1;
@@ -587,6 +754,56 @@ function createGameBoyRandomizer() {
         reset: function () {
             previous1 = -1;
             previous2 = -1;
+        }
+    };
+}
+
+// Sega (System 16, 1988): a 32-bit seed generates a 1000-piece sequence that
+// repeats every 1000 pieces. Seed 0 is replaced by a built-in constant, which
+// produces the documented power-on sequence. The seed field accepts decimal or
+// 0x-hex values; any other text is hashed like the other randomizers.
+var SEGA_DEFAULT_SEED = 0x2A6D365A;
+// Codes 0..6 from the original `rand() % 7` switch, mapped to TYPES indexes.
+var segaPieceMap = [0, 6, 4, 3, 5, 2, 1];
+
+function parseSegaSeed(text) {
+    var s = String(text).trim();
+    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16) >>> 0;
+    if (/^[0-9]+$/.test(s)) return parseInt(s, 10) >>> 0;
+    return hashSeedString(s);
+}
+
+// One step of the original uint32_t rand(): returns the new seed and the
+// 32-bit value it produced.
+function segaRand(seed) {
+    var temp = (seed >>> 0) === 0 ? SEGA_DEFAULT_SEED : (seed >>> 0);
+    var oldseed = temp;
+    temp = Math.imul(temp, 41) >>> 0;
+    var nextSeed = (temp + ((temp << 16) >>> 0)) >>> 0;
+    var value = (((temp & 0xFFFF) + (temp >>> 16)) | (oldseed & 0xFFFF0000)) >>> 0;
+    return { seed: nextSeed, value: value };
+}
+
+function createSegaRandomizer() {
+    var seq = [];
+    var index = 0;
+    return {
+        next: function () {
+            if (seq.length === 0) {
+                var seed = parseSegaSeed(gameSeed);
+                for (var i = 0; i < 1000; i++) {
+                    var r = segaRand(seed);
+                    seed = r.seed;
+                    seq.push(segaPieceMap[(r.value & 0x3F) % 7]);
+                }
+            }
+            var piece = seq[index];
+            index = (index + 1) % 1000;
+            return piece;
+        },
+        reset: function () {
+            seq = [];
+            index = 0;
         }
     };
 }
@@ -694,139 +911,15 @@ function createTgm3Randomizer() {
     };
 }
 
-// Bag containing a number of copies of each of the seven pieces.
-function createBagRandomizer(size) {
-    var bag = [];
-
-    function refill() {
-        function shuffle(bag) {
-            for (var i = bag.length - 1; i > 0; i--) {
-                var j = Math.floor(gameRandom() * (i + 1));
-                var tmp = bag[i];
-                bag[i] = bag[j];
-                bag[j] = tmp;
-            }
-        }
-
-        bag = [];
-        var copies = Math.floor(size / 7);
-        for (var c = 0; c < copies; c++) {
-            for (var i = 0; i < TYPES.length; i++) {
-                bag.push(i);
-            }
-        }
-
-        var leftover = size - copies * 7;
-        var extra = [];
-        for (var i = 0; i < TYPES.length; i++) {
-            extra.push(i);
-        }
-        shuffle(extra);
-
-        for (var i = 0; i < leftover; i++) {
-            bag.push(extra[i]);
-        }
-        shuffle(bag);
-    }
-
+// Each factory returns { next, reset }; next() yields an index into TYPES.
+function createUniformRandomizer() {
     return {
-        next: function () {
-            if (bag.length === 0) refill();
-            return bag.pop();
-        },
-        reset: function () { bag = []; }
+        next: function () { return Math.floor(gameRandom() * 7); },
+        reset: function () { }
     };
 }
 
-// Seeded PRNG (xmur3 hash + mulberry32) so that one seed reproduces both the
-// piece sequence and the Random Start fill.
-function hashSeedString(text) {
-    var h = 1779033703 ^ text.length;
-    for (var i = 0; i < text.length; i++) {
-        h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
-        h = (h << 13) | (h >>> 19);
-    }
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return (h ^ (h >>> 16)) >>> 0;
-}
-
-function createSeededRandom(seedText) {
-    var a = hashSeedString(String(seedText)) || 1;
-    return function () {
-        a = (a + 0x6D2B79F5) | 0;
-        var t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-// Random source used by the randomizers; swapped for a seeded one each game.
-var gameRandom = Math.random;
-var gameSeed = "";
-var seedRevealPending = false;
-var randomStartEnabled = true;
-
-function setRandomStart(enabled) {
-    if (gameStarted) {
-        var box = document.getElementById("randomStartCheckbox");
-        if (box) box.checked = randomStartEnabled;
-        return;
-    }
-    randomStartEnabled = !!enabled;
-    refreshStatsIfVisible();
-}
-
-// Sega (System 16, 1988): a 32-bit seed generates a 1000-piece sequence that
-// repeats every 1000 pieces. Seed 0 is replaced by a built-in constant, which
-// produces the documented power-on sequence. The seed field accepts decimal or
-// 0x-hex values; any other text is hashed like the other randomizers.
-var SEGA_DEFAULT_SEED = 0x2A6D365A;
-// Codes 0..6 from the original `rand() % 7` switch, mapped to TYPES indexes.
-var segaPieceMap = [0, 6, 4, 3, 5, 2, 1];
-
-function parseSegaSeed(text) {
-    var s = String(text).trim();
-    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16) >>> 0;
-    if (/^[0-9]+$/.test(s)) return parseInt(s, 10) >>> 0;
-    return hashSeedString(s);
-}
-
-// One step of the original uint32_t rand(): returns the new seed and the
-// 32-bit value it produced.
-function segaRand(seed) {
-    var temp = (seed >>> 0) === 0 ? SEGA_DEFAULT_SEED : (seed >>> 0);
-    var oldseed = temp;
-    temp = Math.imul(temp, 41) >>> 0;
-    var nextSeed = (temp + ((temp << 16) >>> 0)) >>> 0;
-    var value = (((temp & 0xFFFF) + (temp >>> 16)) | (oldseed & 0xFFFF0000)) >>> 0;
-    return { seed: nextSeed, value: value };
-}
-
-function createSegaRandomizer() {
-    var seq = [];
-    var index = 0;
-    return {
-        next: function () {
-            if (seq.length === 0) {
-                var seed = parseSegaSeed(gameSeed);
-                for (var i = 0; i < 1000; i++) {
-                    var r = segaRand(seed);
-                    seed = r.seed;
-                    seq.push(segaPieceMap[(r.value & 0x3F) % 7]);
-                }
-            }
-            var piece = seq[index];
-            index = (index + 1) % 1000;
-            return piece;
-        },
-        reset: function () {
-            seq = [];
-            index = 0;
-        }
-    };
-}
-
+// Registry of available randomizers and the one used by the current game
 var RANDOMIZERS = {
     "7-bag": function () { return createBagRandomizer(7); },
     "nes": createNesRandomizer,
@@ -867,25 +960,250 @@ function setRandomizer(name) {
     refreshStatsIfVisible();
 }
 
-function makeBlock(type) {
+
+//#endregion
+
+//#region Logics
+
+// ---- Pieces and board helpers ----
+
+function makeTetrimino(type) {
     var id = TYPES.indexOf(type);
-    var blockSize = blocks[id].length;
+    var blockSize = tetriminos[id].length;
     var result = [];
     // Transpose and flip (a.k.a. rotate) the matrix to get the correct shape
     for (var i = 0; i < blockSize; i++) {
         result.push([]);
         for (var j = 0; j < blockSize; j++) {
-            result[i].push(blocks[id][blockSize - 1 - j][i]);
+            result[i].push(tetriminos[id][blockSize - 1 - j][i]);
         }
     }
     return result;
 }
-//#endregion
 
-//#region Logics
+function rotateClockwise(block) {
+    var newBlock = []
+    var blockSize = block.length
 
-var cx, cy  // position of current block
+    for (var i = 0; i < blockSize; i++) {
+        newBlock.push([])
+        for (var j = 0; j < blockSize; j++) {
+            newBlock[i].push(block[blockSize - 1 - j][i])
+        }
+    }
+    return newBlock;
+}
 
+function copyMatrix(dst, src) {
+    for (var i = 0; i < src.length; i++) {
+        dst.push([])
+        for (var j = 0; j < src[i].length; j++) {
+            dst[i].push(src[i][j])
+        }
+    }
+}
+
+function testBlockPlace(newBlock, x, y, targetBoard) {
+    var prevBoard = targetBoard || board;
+    var blockSize = newBlock.length;
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (newBlock[i][j] != 0) {
+                var ni = x + i, nj = y + j
+                if (ni < 0 || nj < 0 || ni >= 10 || nj >= 25 || prevBoard[ni][nj] != 0) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+function addBlockToBoard(prevBoard, block, x, y) {
+    var blockSize = block.length
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (block[i][j] != 0) {
+                prevBoard[x + i][y + j] = block[i][j]
+            }
+        }
+    }
+}
+
+function addCurrentToBoard() {
+    addBlockToBoard(board, currentBlock, cx, cy);
+}
+
+function deleteCurrentFromBoard() {
+    var blockSize = currentBlock.length
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (currentBlock[i][j] != 0) {
+                board[cx + i][cy + j] = 0
+            }
+        }
+    }
+}
+
+// Copy of the board with the ghost piece at its landing position
+function getShadowBoard() {
+    var result = []
+    var shadowBlock = []
+    copyMatrix(result, board)
+    copyMatrix(shadowBlock, currentBlock)
+    var blockSize = currentBlock.length
+    if (blockSize == 0) return result;
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (shadowBlock[i][j] != 0) {
+                shadowBlock[i][j] = 8;
+            }
+        }
+    }
+    // Remove the current piece from the copy only, so the shadow can fall
+    // through the cells the piece occupies right now.
+    for (var i = 0; i < blockSize; i++) {
+        for (var j = 0; j < blockSize; j++) {
+            if (currentBlock[i][j] != 0) {
+                result[cx + i][cy + j] = 0;
+            }
+        }
+    }
+    var maxDownDistance = 0;
+    for (; testBlockPlace(shadowBlock, cx, cy - maxDownDistance, result); maxDownDistance++);
+    maxDownDistance--;
+    addBlockToBoard(result, shadowBlock, cx, cy - maxDownDistance);
+    addBlockToBoard(result, currentBlock, cx, cy);
+    return result;
+}
+
+// ---- Movement ----
+
+function tryMove(dx, dy) {
+    // Calculate the new position of the block
+    var ncx = cx + dx, ncy = cy + dy
+    gameLog("Attempting to move block from (" + cx + ", " + cy + ") to (" + ncx + ", " + ncy + ")");
+
+    deleteCurrentFromBoard()
+    var result = testBlockPlace(currentBlock, ncx, ncy);
+    if (result) { 
+        cx = ncx, cy = ncy; 
+        gameLog("Move successful. New position: (" + cx + ", " + cy + ")");
+    } else {
+        gameLog("Move failed. Block remains at (" + cx + ", " + cy + ")");
+    }
+    addCurrentToBoard()
+
+    return result
+}
+
+function tryRotate() {
+    // Calculate the new shape of the block
+    var newBlock = rotateClockwise(currentBlock);
+
+    deleteCurrentFromBoard();
+
+    var kickData = getWallKickTable();
+    var currentRotation = getRotationState();
+    var nextRotation = getNextRotationState(currentRotation);
+    var kickKey = currentRotation + "->" + nextRotation;
+    var kicks = kickData ? kickData[kickKey] : null;
+    var result = false;
+    if (!kicks) { // a hand-written table may leave a transition out
+        addCurrentToBoard();
+        return false;
+    }
+    // With wall kicks disabled only the first offset of the transition is used.
+    if (!wallKickEnabled && kicks.length > 1) kicks = [kicks[0]];
+    gameLog("Attempting rotation.");
+    gameLog("Current rotation: " + currentRotation);
+    gameLog("Next rotation: " + nextRotation);
+    gameLog("Kick key: " + kickKey);
+    gameLog("Block type: " + currentBlockType);
+    gameLog("Kicks: " + JSON.stringify(kicks));
+
+    for (var k = 0; k < kicks.length; k++) {
+        var kick = kicks[k];
+        var tempPos = [cx + kick[0], cy + kick[1]];
+
+        if (testBlockPlace(newBlock, tempPos[0], tempPos[1])) {
+            currentBlock = newBlock;
+            cx = tempPos[0];
+            cy = tempPos[1];
+            currentRotationState = getNextRotationState(currentRotationState);
+            result = true;
+            gameLog("Rotation successful.");
+            gameLog("New position: (" + cx + ", " + cy + ")");
+            gameLog("New rotation: " + currentRotationState);
+            gameLog("Used kick: " + JSON.stringify(kick));
+            break;
+        }
+
+        if (k === 0 && rotationRulesBlockKick(currentBlockType, newBlock, tempPos[0], tempPos[1])) {
+            gameLog("Rotation blocked by rotation rule after the first kick failed.");
+            break;
+        }
+    }
+    
+    addCurrentToBoard();
+    return result;
+}
+
+// Board setup and the game loop
+function initBoard() {
+    board = []
+    for (var i = 0; i < 10; i++) {
+        var arr = []
+        for (var j = 0; j < 25; j++) {
+            arr.push(0)
+        }
+        board.push(arr)
+    }
+}
+
+function fillRandomStart() {
+    if (!randomStartEnabled) return;
+    for (var row = 0; row < 8; row++) {
+        var count = 9 - row;
+        var cells = [];
+        for (var x = 0; x < 10; x++) cells.push(x);
+        for (var k = 0; k < count; k++) {
+            var pick = k + Math.floor(gameRandom() * (10 - k));
+            var tmp = cells[k];
+            cells[k] = cells[pick];
+            cells[pick] = tmp;
+            board[cells[k]][row] = Math.floor(gameRandom() * 7) + 1;
+        }
+    }
+}
+
+function initGame() {
+    initBoard()
+    fillRandomStart()
+    currentBlock = []
+    nextBlock = []
+    requestQueue = []
+    line = 0
+    score = 0
+    GameFailed = false
+    GameStopped = false
+    gameStarted = true
+    dropTicks = 0
+    nonIStreak = 0
+    longestNonIStreak = 0
+    stats = { single: 0, double: 0, triple: 0, tetris: 0 }
+    pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 }
+    currentRotationState = "0"
+    currentBlockType = "I"
+    nextBlockType = "I"
+    randomizer.reset()
+    document.getElementById("score").textContent = "0"
+    document.getElementById("count").textContent = "0"
+    genNextBlock()
+    genNextBlock()
+}
+
+// Spawn the next piece, clear completed lines and detect a topped-out board
 function genNextBlock() {
     var id = randomizer.next();
     var type = TYPES[id];
@@ -942,8 +1260,7 @@ function genNextBlock() {
     }
 
     if (GameStopped) {
-        clearInterval(timer1);
-        clearInterval(timer2);
+        stopTimer();
         document.getElementById("pauseBtn").value = "Pause";
         syncStartButton();
         draw();
@@ -965,59 +1282,6 @@ function genNextBlock() {
     refreshStatsIfVisible();
 }
 
-function initBoard() {
-    board = []
-    for (var i = 0; i < 10; i++) {
-        var arr = []
-        for (var j = 0; j < 25; j++) {
-            arr.push(0)
-        }
-        board.push(arr)
-    }
-}
-
-function fillRandomStart() {
-    if (!randomStartEnabled) return;
-    for (var row = 0; row < 8; row++) {
-        var count = 9 - row;
-        var cells = [];
-        for (var x = 0; x < 10; x++) cells.push(x);
-        for (var k = 0; k < count; k++) {
-            var pick = k + Math.floor(gameRandom() * (10 - k));
-            var tmp = cells[k];
-            cells[k] = cells[pick];
-            cells[pick] = tmp;
-            board[cells[k]][row] = Math.floor(gameRandom() * 7) + 1;
-        }
-    }
-}
-
-function initGame() {
-    initBoard()
-    fillRandomStart()
-    currentBlock = []
-    nextBlock = []
-    requestQueue = []
-    line = 0
-    score = 0
-    GameFailed = false
-    GameStopped = false
-    gameStarted = true
-    resetTimerScheduled = false
-    nonIStreak = 0
-    longestNonIStreak = 0
-    stats = { single: 0, double: 0, triple: 0, tetris: 0 }
-    pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 }
-    currentRotationState = "0"
-    currentBlockType = "I"
-    nextBlockType = "I"
-    randomizer.reset()
-    document.getElementById("score").textContent = "0"
-    document.getElementById("count").textContent = "0"
-    genNextBlock()
-    genNextBlock()
-}
-
 // 1 left 2 right 3 up 4 down 5 auto-down
 function calcNext() {
     if (GameStopped) return
@@ -1031,7 +1295,8 @@ function calcNext() {
             tryRotate()
         } else if (i == 4) {
             if (tryMove(0, -1)) {
-                resetTimerScheduled = true
+                // A manual drop restarts gravity.
+                dropTicks = 0
             } else {
                 genNextBlock()
             }
@@ -1045,244 +1310,35 @@ function calcNext() {
     requestQueue = []
     if (GameStopped) return
     draw()
-    if (resetTimerScheduled) {
-        resetTimerScheduled = false;
-        setTimer();
-    }
 }
 
-function testBlockPlace(newBlock, x, y, targetBoard) {
-    var prevBoard = targetBoard || board;
-    var blockSize = newBlock.length;
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (newBlock[i][j] != 0) {
-                var ni = x + i, nj = y + j
-                if (ni < 0 || nj < 0 || ni >= 10 || nj >= 25 || prevBoard[ni][nj] != 0) {
-                    return false;
-                }
-            }
-        }
+// One tick of the game: the automatic drop request is queued first when the
+// piece is due, then the queue is drained in a single pass, so input and
+// gravity always land in the same frame.
+function gameTick() {
+    if (GameStopped) return
+    dropTicks++;
+    if (dropTicks >= DROP_TICKS) {
+        dropTicks = 0;
+        // A manual drop queued for this tick consumes the slot, so the piece
+        // never falls two cells in one tick.
+        if (requestQueue.indexOf(4) < 0) requestQueue.push(5);
     }
-    return true;
+    calcNext();
 }
 
-function deleteCurrentFromBoard() {
-    var blockSize = currentBlock.length
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                board[cx + i][cy + j] = 0
-            }
-        }
-    }
+function startTimer() {
+    stopTimer()
+    dropTicks = 0
+    gameTimer = setInterval(gameTick, TICK_MS)
 }
 
-function addBlockToBoard(prevBoard, block, x, y) {
-    var blockSize = block.length
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (block[i][j] != 0) {
-                prevBoard[x + i][y + j] = block[i][j]
-            }
-        }
-    }
+function stopTimer() {
+    if (gameTimer !== null) clearInterval(gameTimer)
+    gameTimer = null
 }
 
-function addCurrentToBoard() {
-    addBlockToBoard(board, currentBlock, cx, cy);
-}
-
-function rotateClockwise(block) {
-    var newBlock = []
-    var blockSize = block.length
-
-    for (var i = 0; i < blockSize; i++) {
-        newBlock.push([])
-        for (var j = 0; j < blockSize; j++) {
-            newBlock[i].push(block[blockSize - 1 - j][i])
-        }
-    }
-    return newBlock;
-}
-
-var ROTATION_RULES = {
-    // Arika RS "center column rule": the L/J/T 3x3 box is searched
-    // 123 / 456 / 789 (top row first, left to right) and the first cell where
-    // the rotated piece collides decides: a middle-column cell (2, 5 or 8)
-    // blocks the rotation, a side-column cell (or no collision) lets the
-    // normal kick loop run.
-    centerColumnRule: function (type, block, x, y) {
-        if (type !== "J" && type !== "L" && type !== "T") return false;
-        var size = block.length;
-        for (var j = size - 1; j >= 0; j--) {
-            for (var i = 0; i < size; i++) {
-                if (block[i][j] == 0) continue;
-                var bx = x + i, by = y + j;
-                var collides = bx < 0 || bx >= 10 || by < 0 || by >= 25 || board[bx][by] != 0;
-                if (collides) return i === 1;
-            }
-        }
-        return false;
-    }
-};
-
-var ROTATION_SYSTEM_RULES = {
-    "arika": ["centerColumnRule"]
-};
-
-function rotationRulesBlockKick(type, block, x, y) {
-    var rules = ROTATION_SYSTEM_RULES[gameRotationSystemName] || [];
-    for (var i = 0; i < rules.length; i++) {
-        var rule = ROTATION_RULES[rules[i]];
-        if (rule && rule(type, block, x, y)) return true;
-    }
-    return false;
-}
-
-function tryMove(dx, dy) {
-    // Calculate the new position of the block
-    var ncx = cx + dx, ncy = cy + dy
-    gameLog("Attempting to move block from (" + cx + ", " + cy + ") to (" + ncx + ", " + ncy + ")");
-
-    deleteCurrentFromBoard()
-    var result = testBlockPlace(currentBlock, ncx, ncy);
-    if (result) { 
-        cx = ncx, cy = ncy; 
-        gameLog("Move successful. New position: (" + cx + ", " + cy + ")");
-    } else {
-        gameLog("Move failed. Block remains at (" + cx + ", " + cy + ")");
-    }
-    addCurrentToBoard()
-
-    return result
-}
-
-function tryRotate() {
-    // Calculate the new shape of the block
-    var newBlock = rotateClockwise(currentBlock);
-
-    deleteCurrentFromBoard();
-
-    // Rules the current system opted into may veto the rotation before any
-    // kick is considered.
-    if (rotationRulesBlockKick(currentBlockType, newBlock, cx, cy)) {
-        addCurrentToBoard();
-        return false;
-    }
-
-    var kickData = getWallKickTable();
-    var currentRotation = getRotationState();
-    var nextRotation = getNextRotationState(currentRotation);
-    var kickKey = currentRotation + "->" + nextRotation;
-    var kicks = kickData ? kickData[kickKey] : null;
-    var result = false;
-    if (!kicks) { // a hand-written table may leave a transition out
-        addCurrentToBoard();
-        return false;
-    }
-    // With wall kicks disabled only the first offset of the transition is used.
-    if (!wallKickEnabled && kicks.length > 1) kicks = [kicks[0]];
-    gameLog("Attempting rotation.");
-    gameLog("Current rotation: " + currentRotation);
-    gameLog("Next rotation: " + nextRotation);
-    gameLog("Kick key: " + kickKey);
-    gameLog("Block type: " + currentBlockType);
-    gameLog("Kicks: " + JSON.stringify(kicks));
-
-    for (var k = 0; k < kicks.length; k++) {
-        var kick = kicks[k];
-        var tempPos = [cx + kick[0], cy + kick[1]];
-
-        if (testBlockPlace(newBlock, tempPos[0], tempPos[1])) {
-            currentBlock = newBlock;
-            cx = tempPos[0];
-            cy = tempPos[1];
-            currentRotationState = getNextRotationState(currentRotationState);
-            result = true;
-            gameLog("Rotation successful.");
-            gameLog("New position: (" + cx + ", " + cy + ")");
-            gameLog("New rotation: " + currentRotationState);
-            gameLog("Used kick: " + JSON.stringify(kick));
-            break;
-        }
-    }
-    
-    addCurrentToBoard();
-    return result;
-}
-
-var currentRotationState = "0"; // 0: initial, R: clockwise, 2: 180 degrees, L: counter-clockwise
-var currentBlockType = "I"; // I, J, L, S, T, Z, O
-var nextBlockType = "I"; // I, J, L, S, T, Z, O
-
-function getRotationState() {
-    return currentRotationState;
-}
-
-function getNextRotationState(currentRotation) {
-    switch (currentRotation) {
-        case "0": return "R";
-        case "R": return "2";
-        case "2": return "L";
-        case "L": return "0";
-        default: return "0";
-    }
-}
-
-function copyMatrix(dst, src) {
-    for (var i = 0; i < src.length; i++) {
-        dst.push([])
-        for (var j = 0; j < src[i].length; j++) {
-            dst[i].push(src[i][j])
-        }
-    }
-}
-
-function getShadowBoard() {
-    var result = []
-    var shadowBlock = []
-    copyMatrix(result, board)
-    copyMatrix(shadowBlock, currentBlock)
-    var blockSize = currentBlock.length
-    if (blockSize == 0) return result;
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (shadowBlock[i][j] != 0) {
-                shadowBlock[i][j] = 8;
-            }
-        }
-    }
-    // Remove the current piece from the copy only, so the shadow can fall
-    // through the cells the piece occupies right now.
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            if (currentBlock[i][j] != 0) {
-                result[cx + i][cy + j] = 0;
-            }
-        }
-    }
-    var maxDownDistance = 0;
-    for (; testBlockPlace(shadowBlock, cx, cy - maxDownDistance, result); maxDownDistance++);
-    maxDownDistance--;
-    addBlockToBoard(result, shadowBlock, cx, cy - maxDownDistance);
-    addBlockToBoard(result, currentBlock, cx, cy);
-    return result;
-}
-
-function setTimer() {
-    clearInterval(timer1)
-    clearInterval(timer2)
-    timer1 = setInterval(calcNext, 100);
-    timer2 = setInterval(() => {
-        requestQueue.push(5)
-    }, 1000);
-}
-
-function clearTimer() {
-    clearInterval(timer1)
-    clearInterval(timer2)
-}
+// ---- Game lifecycle ----
 
 function startGame() {
     var select = document.getElementById("randomizerSelect");
@@ -1329,16 +1385,16 @@ function startGame() {
     syncStartButton()
     document.getElementById("pauseBtn").value = "Pause"
     initGame()
-    setTimer()
+    startTimer()
     requestQueue = []
 }
 
 function resetGame() {
-    clearTimer()
+    stopTimer()
     gameStarted = false
     GameStopped = true
     GameFailed = false
-    resetTimerScheduled = false
+    dropTicks = 0
     initBoard()
     currentBlock = []
     nextBlock = []
@@ -1381,11 +1437,11 @@ function pauseGame() {
         GameStopped = false
         document.getElementById("pauseBtn").value = "Pause"
         requestQueue = []
-        setTimer()
+        startTimer()
     } else {
         GameStopped = true
         document.getElementById("pauseBtn").value = "Unpause"
-        clearTimer()
+        stopTimer()
     }
 }
 
@@ -1399,7 +1455,7 @@ function abortGame() {
 
     GameFailed = true
     GameStopped = true
-    clearTimer()
+    stopTimer()
     revealSeed()
     document.getElementById("pauseBtn").value = "Pause"
     syncStartButton()
@@ -1410,6 +1466,9 @@ function abortGame() {
 //#endregion
 
 //#region UI
+
+// Start / Abort / Reset button
+
 function startButtonAction() {
     if (!gameStarted) {
         startGame()
@@ -1427,6 +1486,36 @@ function syncStartButton() {
     var mobile = document.getElementById("mobileStartBtn");
     if (mobile) mobile.value = label.charAt(0)
 }
+
+// Configuration panel (randomizer, rotation system, wall kick, random start, seed)
+
+// Show/hide the settings row that holds the randomizer and rotation system selects.
+function toggleConfig() {
+    var btn = document.getElementById("configBtn");
+    if (btn && btn.disabled) return;
+    var row = document.getElementById("configRow");
+    if (!row) return;
+    row.style.display = (row.style.display === "block") ? "none" : "block";
+}
+
+function setConfigEnabled(enabled) {
+    var btn = document.getElementById("configBtn");
+    if (btn) btn.disabled = !enabled;
+    var row = document.getElementById("configRow");
+    if (row && !enabled) row.style.display = "none";
+    var ids = ["randomizerSelect", "rotationSystemSelect", "seedInput", "randomStartCheckbox"];
+    for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.disabled = !enabled;
+    }
+    var box = document.getElementById("wallKickCheckbox");
+    if (box) {
+        if (!enabled) box.disabled = true;
+        else refreshWallKickAvailability();
+    }
+}
+
+// Configuration handlers; the panel is locked while a game is running
 
 function refreshWallKickAvailability() {
     var box = document.getElementById("wallKickCheckbox");
@@ -1454,23 +1543,17 @@ function setRotationSystem(name) {
     refreshStatsIfVisible();
 }
 
-function setConfigEnabled(enabled) {
-    var btn = document.getElementById("configBtn");
-    if (btn) btn.disabled = !enabled;
-    var row = document.getElementById("configRow");
-    if (row && !enabled) row.style.display = "none";
-    var ids = ["randomizerSelect", "rotationSystemSelect", "seedInput", "randomStartCheckbox"];
-    for (var i = 0; i < ids.length; i++) {
-        var el = document.getElementById(ids[i]);
-        if (el) el.disabled = !enabled;
+function setRandomStart(enabled) {
+    var box = document.getElementById("randomStartCheckbox");
+    if (gameStarted) {
+        if (box) box.checked = randomStartEnabled;
+        return;
     }
-    var box = document.getElementById("wallKickCheckbox");
-    if (box) {
-        if (!enabled) box.disabled = true;
-        else refreshWallKickAvailability();
-    }
+    randomStartEnabled = !!enabled;
+    refreshStatsIfVisible();
 }
 
+// Stats panel toggle
 function toggleStats() {
     var panel = document.getElementById("statsPanel");
     if (!panel) return;
@@ -1481,6 +1564,7 @@ function toggleStats() {
         refreshStats();
     }
 }
+
 //#endregion
 
 //#region Stats
@@ -1559,9 +1643,38 @@ function revealSeed() {
     seedRevealPending = false;
     refreshStatsIfVisible();
 }
+
 //#endregion
 
-//#region Mobile Compability
+//#region Input
+
+// Action requests shared by the keyboard listener and the on-screen buttons.
+// Each queues a code for calcNext() and caps the queue at 8 entries.
+
+function requestUp() {
+    if (GameStopped || requestQueue.length >= 8) return
+    requestQueue.push(3)
+}
+
+function requestDown() {
+    if (GameStopped || requestQueue.length >= 8) return
+    requestQueue.push(4)
+}
+
+function requestLeft() {
+    if (GameStopped || requestQueue.length >= 8) return
+    requestQueue.push(1)
+}
+
+function requestRight() {
+    if (GameStopped || requestQueue.length >= 8) return
+    requestQueue.push(2)
+}
+
+//#endregion
+
+//#region Mobile Compatibility
+
 var vBtnShown = false
 
 function showVirtualBtns() {
@@ -1594,26 +1707,9 @@ function showVirtualBtns() {
     draw()
 }
 
-function requestUp() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(3)
-}
-
-function requestDown() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(4)
-}
-
-function requestLeft() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(1)
-}
-
-function requestRight() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(2)
-}
 //#endregion
+
+//#region Bootstrap
 
 window.onload = function init() {
 
@@ -1666,3 +1762,5 @@ document.onkeydown = function keydown(evt) {
     }
     if (handled) evt.preventDefault();
 }
+
+//#endregion
