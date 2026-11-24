@@ -1640,6 +1640,14 @@ function vbtnDirAttrs(action) {
         + ' oncontextmenu="return false"'
 }
 
+// The keyboard hint only pays off when there is a keyboard. With the on-screen
+// buttons up it is redundant, and on a narrow phone screen it is what wraps the
+// score row onto a second line, so it appears and disappears with them.
+function updateControlHint() {
+    var hint = document.getElementById("controlHint");
+    if (hint) hint.style.display = vBtnShown ? "none" : "";
+}
+
 function showVirtualBtns() {
     if (!gl) return;
 
@@ -1669,6 +1677,7 @@ function showVirtualBtns() {
     } else {
         document.getElementById("btnBox").innerHTML = ""
     }
+    updateControlHint()
     setCanvas()
     draw()
 }
