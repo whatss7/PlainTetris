@@ -25,6 +25,9 @@
     </script>
 
     <script type="text/javascript" src="webgl-utils.js"></script>
+    <script type="text/javascript" src="rotation.js"></script>
+    <script type="text/javascript" src="randomizer.js"></script>
+    <script type="text/javascript" src="movement.js"></script>
     <script type="text/javascript" src="script.js"></script>
     
     <style type="text/css">
@@ -35,6 +38,17 @@
     
         .inline {
             display: inline-block;
+        }
+
+        /* On-screen buttons: kill the browser's long-press behaviour (text
+           selection, iOS callout, the context menu) and hand all touch
+           gestures to the pointer handlers instead of scrolling/zooming. */
+        .vbtn {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         #statsPanel {
@@ -95,6 +109,11 @@
                     </select>
                 </label>
                 <a>|</a>
+                <label><input type="checkbox" id="randomStartCheckbox" onchange="setRandomStart(this.checked)"/> Random Start</label>
+                <a>|</a>
+                <label>Seed: <input id="seedInput" type="text" size="12" placeholder="random"/></label>
+            </div>
+            <div>
                 <label>Rotation System:
                     <select id="rotationSystemSelect" onchange="setRotationSystem(this.value); this.blur()">
                         <option value="srs" selected>SRS</option>
@@ -102,22 +121,48 @@
                         <option value="gb">Game Boy</option>
                         <option value="sega">Sega</option>
                         <option value="arika">Arika</option>
+                        <option value="tgm3">Arika TGM3</option>
                         <option value="asrs">Arika SRS</option>
                         <option value="t64">Tetris 64</option>
                     </select>
                 </label>
+                <a>|</a>
+                <label><input type="checkbox" id="wallKickCheckbox" checked onchange="setWallKickEnabled(this.checked)"/> Enable Wall Kick</label>
             </div>
-            <label><input type="checkbox" id="wallKickCheckbox" checked onchange="setWallKickEnabled(this.checked)"/> Enable Wall Kick</label>
-            <a>|</a>
-            <label><input type="checkbox" id="randomStartCheckbox" onchange="setRandomStart(this.checked)"/> Random Start</label>
-            <a>|</a>
-            <label>Seed: <input id="seedInput" type="text" size="12" placeholder="random"/></label>
+            <div>
+                <label>Movement:
+                    <select id="movementSelect" onchange="setMovement(this.value); this.blur()">
+                        <option value="modern" selected>Modern</option>
+                        <option value="nes">NES</option>
+                        <option value="gb">Game Boy</option>
+                        <option value="sega">Sega</option>
+                        <option value="tgm">Arika TGM</option>
+                        <option value="tgm2">Arika TGM2</option>
+                        <option value="tgm3">Arika TGM3</option>
+                        <option value="tgm4">Arika TGM4</option>
+                        <option value="raw">Raw</option>
+                    </select>
+                </label>
+                <a>|</a>
+                <label>Difficulty:
+                    <select id="difficultySelect" onchange="setDifficulty(this.value); this.blur()">
+                        <option value="default">Default</option>
+                        <option value="custom" selected>Custom</option>
+                    </select>
+                </label>
+                <a>|</a>
+                <label>Start Level:
+                    <input id="startLevelInput" type="number" value="1" min="1" max="19" style="width:60px" onchange="setStartLevel(this.value)"/>
+                </label>
+            </div>
         </div>
         <div id="scoreRow">
             <p class="inline">Score:</p>
             <p id="score" class="inline">0</p>
             <p class="inline">Count:</p>
             <p id="count" class="inline">0</p>
+            <p class="inline">Level:</p>
+            <p id="level" class="inline">0</p>
             <p class="inline">&larr; &rarr; &darr;: Move &uarr;: Rotate</p>
         </div>
     </div>
@@ -133,8 +178,12 @@
         <div id="statsMode"></div>
         <div id="statsRandomizer"></div>
         <div id="statsRotationSystem"></div>
-        <div id="statsScore"></div>
+        <div id="statsMovement"></div>
+        <div id="statsStartLevel"></div>
         <div id="statsSeed"></div>
+        <div id="statsScore"></div>
+        <div id="statsTSpins"></div>
+        <div id="statsMiniTSpins"></div>
         <div id="statsPieces"></div>
         <div id="statsStreak"></div>
         <div id="statsCounts"></div>

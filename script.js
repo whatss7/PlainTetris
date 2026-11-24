@@ -32,6 +32,18 @@ var nextBlock = [];
 
 // Input queue and the state of the current session
 var requestQueue = [];
+
+// Directions currently held down, for auto-shift. `ticks` counts game-loop
+// ticks since the press and drives the repeat timing.
+var heldDirs = {
+    left: { pressed: false, ticks: 0 },
+    right: { pressed: false, ticks: 0 },
+    down: { pressed: false, ticks: 0 },
+    rotate: { pressed: false, ticks: 0 }
+};
+// The most recently pressed of left/right; decides which side wins when both
+// are held down at once.
+var lastHeldDir = null;
 var line = 0;
 var score = 0;
 var GameStopped = false;
@@ -53,6 +65,32 @@ var randomStartEnabled = false;
 // Timer: a single interval drives the whole game.
 var gameTimer = null;
 var dropTicks = 0;
+// Ticks left in the ARE pause after a lock; 0 means no pause is running.
+var areTicks = 0;
+// Fractional auto-down left over from the previous tick (modern curve only):
+// a curve faster than 1G asks for several rows per tick, a slower one needs
+// several ticks per row.
+var gravityDemand = 0;
+// Frames the piece has spent resting on the stack while its lock delay runs.
+var lockTicks = 0;
+// Whether the piece was already resting on the stack when the current frame
+// began. Games without a lock delay use it to give a landing piece one frame
+// of grace before it locks.
+var restingAtFrameStart = false;
+
+// Gravity tolerances and the high-speed cap. A curve asking for 20 cells per
+// tick or more falls at a fixed 25 rows per frame instead: that covers the
+// 22 rows between the highest spawn location (row 21, used by Tetris 64) and
+// the floor, and it puts a hard ceiling on the work one frame can queue if a
+// curve value is ever huge. The tolerance makes a float a hair under 20 from
+// accumulated error still count as 20G.
+var GRAVITY_EPSILON = 1e-9;
+var HIGH_GRAVITY = 20;
+var HIGH_GRAVITY_ROWS = 25;
+
+function clampGravitySpeed(speed) {
+    return speed >= HIGH_GRAVITY - GRAVITY_EPSILON ? HIGH_GRAVITY_ROWS : speed;
+}
 
 // Canvas scale factors for desktop and mobile layouts
 var globalScale = 1;
@@ -142,308 +180,8 @@ var TICK_RATE = 60;
 var TICK_MS = 1000 / TICK_RATE;
 var DROP_TICKS = 60;
 
-//#endregion
-
-//#region Rotation System
-
-// Combine a per-transition basic rotation offset with a list of kick offsets
-function makeWallKickTableFromBasicRotation(basicRotationTable, wallKickTable) {
-    var newWallKickTable = {};
-    for (var key in basicRotationTable) {
-        if (!Object.prototype.hasOwnProperty.call(basicRotationTable, key)) continue;
-        var basicRotation = basicRotationTable[key][0] || [0, 0];
-        var item = [];
-        for (var i = 0; i < wallKickTable.length; i++) {
-            var offset = wallKickTable[i];
-            item.push([basicRotation[0] + offset[0], basicRotation[1] + offset[1]]);
-        }
-        newWallKickTable[key] = item;
-    }
-    return newWallKickTable;
-}
-
-var wallKickNone = {
-    "0->R": [[0, 0]],
-    "R->0": [[0, 0]],
-    "R->2": [[0, 0]],
-    "2->R": [[0, 0]],
-    "2->L": [[0, 0]],
-    "L->2": [[0, 0]],
-    "L->0": [[0, 0]],
-    "0->L": [[0, 0]]
-};
-
-var wallKickSRS_JLSTZ = {
-    "0->R": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
-    "R->0": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
-    "R->2": [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
-    "2->R": [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]],
-    "2->L": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
-    "L->2": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
-    "L->0": [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
-    "0->L": [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]]
-};
-
-var wallKickSRS_I = {
-    "0->R": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
-    "R->0": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
-    "R->2": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
-    "2->R": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
-    "2->L": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
-    "L->2": [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2]],
-    "L->0": [[0, 0], [1, 0], [-2, 0], [1, -2], [-2, 1]],
-    "0->L": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]]
-};
-
-var wallKickNES_ISZ = {
-    "0->R": [[0, 1]],
-    "R->0": [[0, -1]],
-    "R->2": [[0, 0]],
-    "2->R": [[0, 0]],
-    "2->L": [[1, 0]],
-    "L->2": [[-1, 0]],
-    "L->0": [[-1, -1]],
-    "0->L": [[1, 1]]
-};
-
-var wallKickGB_ISZ = {
-    "0->R": [[-1, 1]],
-    "R->0": [[1, -1]],
-    "R->2": [[1, 0]],
-    "2->R": [[-1, 0]],
-    "2->L": [[0, 0]],
-    "L->2": [[0, 0]],
-    "L->0": [[0, -1]],
-    "0->L": [[0, 1]]
-};
-
-var wallKickSega_I = {
-    "0->R": [[0, 0]],
-    "R->0": [[0, 0]],
-    "R->2": [[0, 1]],
-    "2->R": [[0, -1]],
-    "2->L": [[1, -1]],
-    "L->2": [[-1, 1]],
-    "L->0": [[-1, 0]],
-    "0->L": [[1, 0]]
-};
-
-var wallKickSega_JLT = {
-    "0->R": [[0, 1]],
-    "R->0": [[0, -1]],
-    "R->2": [[0, 0]],
-    "2->R": [[0, 0]],
-    "2->L": [[0, 0]],
-    "L->2": [[0, 0]],
-    "L->0": [[0, -1]],
-    "0->L": [[0, 1]]
-};
-
-var arikaKickTable = [[0, 0], [1, 0], [-1, 0]];
-var wallKickArika_S = makeWallKickTableFromBasicRotation(wallKickGB_ISZ, arikaKickTable);
-var wallKickArika_Z = makeWallKickTableFromBasicRotation(wallKickNES_ISZ, arikaKickTable);
-var wallKickArika_JLT = makeWallKickTableFromBasicRotation(wallKickSega_JLT, arikaKickTable);
-
-var wallKickASRS_I = {
-    "0->R": [[0, 0], [-2, 0], [1, 0], [1, 2], [-2, -1]],
-    "R->0": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -2]],
-    "R->2": [[0, 0], [-1, 0], [2, 0], [-1, 2], [2, -1]],
-    "2->R": [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -1]],
-    "2->L": [[0, 0], [2, 0], [-1, 0], [2, 1], [-1, -1]],
-    "L->2": [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]],
-    "L->0": [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
-    "0->L": [[0, 0], [2, 0], [-1, 0], [-1, 2], [2, -1]]
-};
-
-var t64KickTable = [[0, 0], [-1, 0], [1, 0]];
-
-var basicRotationT64_I = {
-    "0->R": [[-1, 0]],
-    "R->0": [[1, 0]],
-    "R->2": [[0, 1]],
-    "2->R": [[0, -1]],
-    "2->L": [[1, 0]],
-    "L->2": [[-1, 0]],
-    "L->0": [[0, -1]],
-    "0->L": [[0, 1]]
-};
-
-var basicRotationT64_O = {
-    "0->R": [[0, 1]],
-    "R->0": [[0, -1]],
-    "R->2": [[1, 0]],
-    "2->R": [[-1, 0]],
-    "2->L": [[0, -1]],
-    "L->2": [[0, 1]],
-    "L->0": [[-1, 0]],
-    "0->L": [[1, 0]]
-};
-
-var wallKickT64_I = makeWallKickTableFromBasicRotation(basicRotationT64_I, t64KickTable);
-var wallKickT64_O = makeWallKickTableFromBasicRotation(basicRotationT64_O, t64KickTable);
-var wallKickT64_Default = makeWallKickTableFromBasicRotation(wallKickNone, t64KickTable);
-
-// Wall kick tables used by each rotation system
-var WALL_KICK_TABLES = {
-    "srs": {
-        "I": wallKickSRS_I,
-        "O": wallKickNone,
-        "default": wallKickSRS_JLSTZ
-    },
-    "nes": {
-        "I": wallKickNES_ISZ,
-        "S": wallKickNES_ISZ,
-        "Z": wallKickNES_ISZ,
-        "default": wallKickNone
-    },
-    "gb": {
-        "I": wallKickGB_ISZ,
-        "S": wallKickGB_ISZ,
-        "Z": wallKickGB_ISZ,
-        "default": wallKickNone
-    },
-    "sega": {
-        "I": wallKickSega_I,
-        "J": wallKickSega_JLT,
-        "L": wallKickSega_JLT,
-        "O": wallKickNone,
-        "S": wallKickGB_ISZ,
-        "T": wallKickSega_JLT,
-        "Z": wallKickNES_ISZ
-    },
-    "arika": {
-        "I": wallKickSega_I,
-        "J": wallKickArika_JLT,
-        "L": wallKickArika_JLT,
-        "O": wallKickNone,
-        "S": wallKickArika_S,
-        "T": wallKickArika_JLT,
-        "Z": wallKickArika_Z
-    },
-    "asrs": {
-        "I": wallKickASRS_I,
-        "O": wallKickNone,
-        "default": wallKickSRS_JLSTZ
-    },
-    "t64": {
-        "I": wallKickT64_I,
-        "O": wallKickT64_O,
-        "default": wallKickT64_Default
-    },
-};
-
-// Display names of the rotation systems
-var ROTATION_SYSTEM_NAMES = {
-    "srs": "SRS",
-    "nes": "NES",
-    "gb": "Game Boy",
-    "sega": "Sega",
-    "arika": "Arika",
-    "asrs": "Arika SRS",
-    "t64": "Tetris 64",
-};
-
-// System and wall kick setting used by the next game
-var gameRotationSystemName = "srs";
-var wallKickEnabled = true;
-
-function rotationSystemSupportsWallKick(name) {
-    var tableSet = WALL_KICK_TABLES[name];
-    if (!tableSet) return false;
-    for (var piece in tableSet) {
-        if (!Object.prototype.hasOwnProperty.call(tableSet, piece)) continue;
-        var kickTable = tableSet[piece];
-        for (var key in kickTable) {
-            if (!Object.prototype.hasOwnProperty.call(kickTable, key)) continue;
-            if (kickTable[key] && kickTable[key].length > 1) return true;
-        }
-    }
-    return false;
-}
-
-function getWallKickTable() {
-    var tableSet = WALL_KICK_TABLES[gameRotationSystemName] || WALL_KICK_TABLES.srs;
-    if (tableSet.hasOwnProperty(currentBlockType)) return tableSet[currentBlockType];
-    return tableSet["default"];
-}
-
-// Extra rules a system can apply once the first kick attempt has failed
-var ROTATION_RULES = {
-    // Arika RS "center column rule": the L/J/T 3x3 box is searched
-    // 123 / 456 / 789 (top row first, left to right) and the first cell where
-    // the rotated piece collides decides: a middle-column cell (2, 5 or 8)
-    // blocks the rotation, a side-column cell (or no collision) lets the
-    // remaining kicks run. It is evaluated only after the table's first
-    // offset (the system's basic rotation) has been tried and failed.
-    centerColumnRule: function (type, block, x, y) {
-        if (type !== "J" && type !== "L" && type !== "T") return false;
-        var size = block.length;
-        for (var j = size - 1; j >= 0; j--) {
-            for (var i = 0; i < size; i++) {
-                if (block[i][j] == 0) continue;
-                var bx = x + i, by = y + j;
-                var collides = bx < 0 || bx >= 10 || by < 0 || by >= 25 || board[bx][by] != 0;
-                if (collides) return i === 1;
-            }
-        }
-        return false;
-    }
-};
-
-var ROTATION_SYSTEM_RULES = {
-    "arika": ["centerColumnRule"]
-};
-
-function rotationRulesBlockKick(type, block, x, y) {
-    var rules = ROTATION_SYSTEM_RULES[gameRotationSystemName] || [];
-    for (var i = 0; i < rules.length; i++) {
-        var rule = ROTATION_RULES[rules[i]];
-        if (rule && rule(type, block, x, y)) return true;
-    }
-    return false;
-}
-
-// Spawn orientation per system: the rotation state a piece starts in
-var SPAWN_STATES = ["0", "R", "2", "L"];
-var SPAWN_STATES_BY_SYSTEM = {
-    "srs": { "default": "0" },
-    "nes": { "default": "2" },
-    "gb": { "default": "2" },
-    "sega": { "default": "2" },
-    "arika": { "default": "2" },
-    "asrs": { "default": "0" },
-    "t64": { "default": "2", "S": "0" },
-};
-
-function getSpawnState(type) {
-    var tableSet = SPAWN_STATES_BY_SYSTEM[gameRotationSystemName] || SPAWN_STATES_BY_SYSTEM.srs;
-    var state = tableSet.hasOwnProperty(type) ? tableSet[type] : tableSet["default"];
-    return SPAWN_STATES.indexOf(state) >= 0 ? state : "0";
-}
-
-// Build a piece in its spawn orientation: the standard state 0 shape rotated
-// clockwise until it reaches the configured state.
-function makeBlockInSpawnState(type) {
-    var block = makeTetrimino(type);
-    var steps = SPAWN_STATES.indexOf(getSpawnState(type));
-    for (var i = 0; i < steps; i++) block = rotateClockwise(block);
-    return block;
-}
-
-// Rotation state machine (0 -> R -> 2 -> L -> 0)
-function getRotationState() {
-    return currentRotationState;
-}
-
-function getNextRotationState(currentRotation) {
-    switch (currentRotation) {
-        case "0": return "R";
-        case "R": return "2";
-        case "2": return "L";
-        case "L": return "0";
-        default: return "0";
-    }
-}
+// Movement timing, lock delay and difficulty lists live in MOVEMENT_DEFINITIONS
+// in movement.js; movement() resolves the selected one.
 
 //#endregion
 
@@ -642,327 +380,6 @@ function setCanvas() {
 
 //#endregion
 
-//#region Randomizers
-
-// Seeded PRNG (xmur3 hash + mulberry32) so that one seed reproduces both the
-// piece sequence and the Random Start fill.
-function hashSeedString(text) {
-    var h = 1779033703 ^ text.length;
-    for (var i = 0; i < text.length; i++) {
-        h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
-        h = (h << 13) | (h >>> 19);
-    }
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return (h ^ (h >>> 16)) >>> 0;
-}
-
-function createSeededRandom(seedText) {
-    var a = hashSeedString(String(seedText)) || 1;
-    return function () {
-        a = (a + 0x6D2B79F5) | 0;
-        var t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-// Bag containing a number of copies of each of the seven pieces.
-function createBagRandomizer(size) {
-    var bag = [];
-
-    function refill() {
-        function shuffle(bag) {
-            for (var i = bag.length - 1; i > 0; i--) {
-                var j = Math.floor(gameRandom() * (i + 1));
-                var tmp = bag[i];
-                bag[i] = bag[j];
-                bag[j] = tmp;
-            }
-        }
-
-        bag = [];
-        var copies = Math.floor(size / 7);
-        for (var c = 0; c < copies; c++) {
-            for (var i = 0; i < TYPES.length; i++) {
-                bag.push(i);
-            }
-        }
-
-        var leftover = size - copies * 7;
-        var extra = [];
-        for (var i = 0; i < TYPES.length; i++) {
-            extra.push(i);
-        }
-        shuffle(extra);
-
-        for (var i = 0; i < leftover; i++) {
-            bag.push(extra[i]);
-        }
-        shuffle(bag);
-    }
-
-    return {
-        next: function () {
-            if (bag.length === 0) refill();
-            return bag.pop();
-        },
-        reset: function () { bag = []; }
-    };
-}
-
-// NES Tetris: roll 0-7, where 7 is a dummy value. If the roll is 7 or the
-// same as the last piece, roll once more from 0-6 and take that result.
-function createNesRandomizer() {
-    var last = -1;
-    return {
-        next: function () {
-            var id = Math.floor(gameRandom() * 8);
-            if (id === 7 || id === last) {
-                id = Math.floor(gameRandom() * 7);
-            }
-            last = id;
-            return id;
-        },
-        reset: function () { last = -1; }
-    };
-}
-
-// Game Boy: pieces are numbered with 3-bit vectors (L=0, J=1, I=2, O=3,
-// Z=4, S=5, T=6; 111 is unused). The first two pieces are fully random;
-// after that a candidate is rerolled while both it and the previous piece
-// are subsets of the piece before the previous one, up to three rolls.
-var gameBoyVectors = [2, 1, 0, 3, 5, 6, 4];
-
-function createGameBoyRandomizer() {
-    var previous1 = -1;
-    var previous2 = -1;
-    return {
-        next: function () {
-            var piece = Math.floor(gameRandom() * 7);
-            for (var attempt = 0; attempt < 2; attempt++) {
-                if (previous1 < 0 || previous2 < 0) break;
-                var similar = (gameBoyVectors[previous1] & ~gameBoyVectors[previous2]) === 0 &&
-                    (gameBoyVectors[piece] & ~gameBoyVectors[previous2]) === 0;
-                if (!similar) break;
-                piece = Math.floor(gameRandom() * 7);
-            }
-            previous2 = previous1;
-            previous1 = piece;
-            return piece;
-        },
-        reset: function () {
-            previous1 = -1;
-            previous2 = -1;
-        }
-    };
-}
-
-// Sega (System 16, 1988): a 32-bit seed generates a 1000-piece sequence that
-// repeats every 1000 pieces. Seed 0 is replaced by a built-in constant, which
-// produces the documented power-on sequence. The seed field accepts decimal or
-// 0x-hex values; any other text is hashed like the other randomizers.
-var SEGA_DEFAULT_SEED = 0x2A6D365A;
-// Codes 0..6 from the original `rand() % 7` switch, mapped to TYPES indexes.
-var segaPieceMap = [0, 6, 4, 3, 5, 2, 1];
-
-function parseSegaSeed(text) {
-    var s = String(text).trim();
-    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16) >>> 0;
-    if (/^[0-9]+$/.test(s)) return parseInt(s, 10) >>> 0;
-    return hashSeedString(s);
-}
-
-// One step of the original uint32_t rand(): returns the new seed and the
-// 32-bit value it produced.
-function segaRand(seed) {
-    var temp = (seed >>> 0) === 0 ? SEGA_DEFAULT_SEED : (seed >>> 0);
-    var oldseed = temp;
-    temp = Math.imul(temp, 41) >>> 0;
-    var nextSeed = (temp + ((temp << 16) >>> 0)) >>> 0;
-    var value = (((temp & 0xFFFF) + (temp >>> 16)) | (oldseed & 0xFFFF0000)) >>> 0;
-    return { seed: nextSeed, value: value };
-}
-
-function createSegaRandomizer() {
-    var seq = [];
-    var index = 0;
-    return {
-        next: function () {
-            if (seq.length === 0) {
-                var seed = parseSegaSeed(gameSeed);
-                for (var i = 0; i < 1000; i++) {
-                    var r = segaRand(seed);
-                    seed = r.seed;
-                    seq.push(segaPieceMap[(r.value & 0x3F) % 7]);
-                }
-            }
-            var piece = seq[index];
-            index = (index + 1) % 1000;
-            return piece;
-        },
-        reset: function () {
-            seq = [];
-            index = 0;
-        }
-    };
-}
-
-// TGM: 4 piece history with 4 rolls
-function createTgmRandomizer() {
-    var history = [6, 6, 6, 6];
-    var first_try = true;
-    return {
-        next: function () {
-            var roll = -1;
-            if (first_try) {
-                first_try = false;
-                roll = [0, 1, 2, 5][Math.floor(gameRandom() * 4)];
-            } else {
-                for (var i = 0; i < 4; i++) {
-                    roll = Math.floor(gameRandom() * 7);
-                    if (history.indexOf(roll) < 0) break;
-                }
-            }
-            history.push(roll);
-            history.shift();
-            return roll;
-        },
-        reset: function () {
-            history = [6, 6, 6, 6];
-            first_try = true;
-        }
-    };
-}
-
-// TGM2: 4 piece history with 6 rolls
-function createTgm2Randomizer() {
-    var history = [6, 4, 6, 4];
-    var first_try = true;
-    return {
-        next: function () {
-            var roll = -1;
-            if (first_try) {
-                first_try = false;
-                roll = [0, 1, 2, 5][Math.floor(gameRandom() * 4)];
-            } else {
-                for (var i = 0; i < 6; i++) {
-                    roll = Math.floor(gameRandom() * 7);
-                    if (history.indexOf(roll) < 0) break;
-                }
-            }
-            history.push(roll);
-            history.shift();
-            return roll;
-        },
-        reset: function () {
-            history = [6, 4, 6, 4];
-            first_try = true;
-        }
-    };
-}
-
-// TGM3: a 35-piece pool (five copies of each piece). A dealt piece is not
-// removed from the pool; its slot is refilled with the most droughted piece
-// instead. Four-piece history, up to six rolls, and the first piece is
-// restricted to I, J, L and T.
-function createTgm3Randomizer() {
-    var pool;
-    var order;
-    var history;
-    var firstPiece;
-
-    function refill() {
-        pool = [];
-        for (var copy = 0; copy < 5; copy++) {
-            for (var i = 0; i < TYPES.length; i++) pool.push(i);
-        }
-        order = [];
-        history = null;
-        firstPiece = true;
-    }
-
-    refill();
-
-    return {
-        next: function () {
-            var piece;
-            if (firstPiece) {
-                firstPiece = false;
-                piece = [0, 1, 2, 5][Math.floor(gameRandom() * 4)];
-                history = [4, 6, 4, piece]; // S, Z, S, first piece
-                return piece;
-            }
-            var roll, i;
-            for (roll = 0; roll < 6; roll++) {
-                i = Math.floor(gameRandom() * 35);
-                piece = pool[i];
-                if (history.indexOf(piece) < 0 || roll === 5) break;
-                if (order.length) pool[i] = order[0];
-            }
-            if (order.indexOf(piece) >= 0) order.splice(order.indexOf(piece), 1);
-            order.push(piece);
-            pool[i] = order[0];
-            history.shift();
-            history[3] = piece;
-            return piece;
-        },
-        reset: refill
-    };
-}
-
-// Each factory returns { next, reset }; next() yields an index into TYPES.
-function createUniformRandomizer() {
-    return {
-        next: function () { return Math.floor(gameRandom() * 7); },
-        reset: function () { }
-    };
-}
-
-// Registry of available randomizers and the one used by the current game
-var RANDOMIZERS = {
-    "7-bag": function () { return createBagRandomizer(7); },
-    "nes": createNesRandomizer,
-    "gb": createGameBoyRandomizer,
-    "sega": createSegaRandomizer,
-    "tgm": createTgmRandomizer,
-    "tgm2": createTgm2Randomizer,
-    "tgm3": createTgm3Randomizer,
-    "uniform": createUniformRandomizer,
-    "8-bag": function () { return createBagRandomizer(8); },
-    "14-bag": function () { return createBagRandomizer(14); },
-    "35-bag": function () { return createBagRandomizer(35); },
-};
-
-var RANDOMIZER_NAMES = {
-    "7-bag": "7-bag",
-    "nes": "NES",
-    "gb": "Game Boy",
-    "sega": "Sega",
-    "tgm": "Arika TGM",
-    "tgm2": "Arika TGM2",
-    "tgm3": "Arika TGM3",
-    "uniform": "Uniform",
-    "8-bag": "8-bag",
-    "14-bag": "14-bag",
-    "35-bag": "35-bag",
-};
-
-// Randomizer used by the current game. It is read from the select when a game
-// starts, so changing the selection mid-game only affects the next game.
-var gameRandomizerName = "uniform";
-var randomizer = createUniformRandomizer();
-
-function setRandomizer(name) {
-    if (!RANDOMIZERS.hasOwnProperty(name)) return;
-    if (gameStarted) return; // a started game keeps its randomizer
-    gameRandomizerName = name;
-    refreshStatsIfVisible();
-}
-
-
-//#endregion
-
 //#region Logics
 
 // ---- Pieces and board helpers ----
@@ -1088,6 +505,12 @@ function tryMove(dx, dy) {
     var result = testBlockPlace(currentBlock, ncx, ncy);
     if (result) { 
         cx = ncx, cy = ncy; 
+        // The last action was a shift, not a turn, for Asuka's T-Spin test.
+        lastActionWasRotation = false;
+        // A step down, or (for move-reset curves) any successful shift,
+        // restarts the lock delay timer.
+        var cfg = lockDelay()
+        if (cfg && (dy < 0 || (dx !== 0 && cfg.reset === "move"))) lockTicks = 0
         gameLog("Move successful. New position: (" + cx + ", " + cy + ")");
     } else {
         gameLog("Move failed. Block remains at (" + cx + ", " + cy + ")");
@@ -1100,6 +523,9 @@ function tryMove(dx, dy) {
 function tryRotate() {
     // Calculate the new shape of the block
     var newBlock = rotateClockwise(currentBlock);
+    // Cells the piece occupies before the turn; a rotation only counts as a
+    // move for the lock timer when this changes.
+    var cellsBefore = pieceCellsKey(currentBlock, cx, cy);
 
     deleteCurrentFromBoard();
 
@@ -1126,11 +552,30 @@ function tryRotate() {
         var kick = kicks[k];
         var tempPos = [cx + kick[0], cy + kick[1]];
 
+        // Some systems make a kick conditional (TGM3's I-piece kicks); skip it
+        // before spending a collision test on it. The index is the position in
+        // the table, which is what the rule uses to tell the groups apart.
+        if (!rotationRulesAllowKick(currentBlockType, newBlock, tempPos[0], tempPos[1], k)) {
+            gameLog("Kick " + k + " not allowed for this rotation.");
+            continue;
+        }
+
         if (testBlockPlace(newBlock, tempPos[0], tempPos[1])) {
             currentBlock = newBlock;
             cx = tempPos[0];
             cy = tempPos[1];
             currentRotationState = getNextRotationState(currentRotationState);
+            lastKickOffset = [kick[0], kick[1]];
+            lastActionWasRotation = true;
+            // Move-reset curves restart the lock delay on a successful turn,
+            // but only when the turn actually changes the occupied cells: an O
+            // piece turning in place must not keep the timer alive. Step-reset
+            // curves only do it when the piece steps downward.
+            var lockCfg = lockDelay();
+            if (lockCfg && lockCfg.reset === "move" &&
+                pieceCellsKey(currentBlock, cx, cy) !== cellsBefore) {
+                lockTicks = 0;
+            }
             result = true;
             gameLog("Rotation successful.");
             gameLog("New position: (" + cx + ", " + cy + ")");
@@ -1183,15 +628,21 @@ function initGame() {
     currentBlock = []
     nextBlock = []
     requestQueue = []
+    releaseAllDirs()
     line = 0
     score = 0
     GameFailed = false
     GameStopped = false
     gameStarted = true
     dropTicks = 0
-    nonIStreak = 0
-    longestNonIStreak = 0
+    areTicks = 0
+    gravityDemand = 0
+    lockTicks = 0
+    resetLevel()
+    IDrought = 0
+    maxIDrought = 0
     stats = { single: 0, double: 0, triple: 0, tetris: 0 }
+    tSpinStats = { single: 0, double: 0, triple: 0, miniSingle: 0, miniDouble: 0 }
     pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 }
     currentRotationState = "0"
     currentBlockType = "I"
@@ -1199,21 +650,135 @@ function initGame() {
     randomizer.reset()
     document.getElementById("score").textContent = "0"
     document.getElementById("count").textContent = "0"
+    // The two spawns below only build the first piece and its preview; they are
+    // not level-ups (TGM counts the pieces that enter the well during play).
+    initialSpawnPhase = true
     genNextBlock()
     genNextBlock()
+    initialSpawnPhase = false
 }
 
-// Spawn the next piece, clear completed lines and detect a topped-out board
+// ARE entry delay for the piece that has just locked. The movement owns the
+// rule: a number is used as is, a function receives the row the piece locked at
+// (NES: bottom two rows 10 frames, +2 for every 4 rows above, up to 18). The
+// locked piece is already in the board and still described by currentBlock /
+// cx / cy when this runs.
+function areTicksForLock() {
+    var timing = levelTiming();
+    if (timing) return timing.are;
+    var spec = movement().are;
+    return typeof spec === "function" ? spec(lockedPieceLowestRow()) : spec;
+}
+
+// Lowest board row occupied by the piece that just locked.
+function lockedPieceLowestRow() {
+    var lockRow = Number.POSITIVE_INFINITY;
+    for (var i = 0; i < currentBlock.length; i++) {
+        for (var j = 0; j < currentBlock[i].length; j++) {
+            if (currentBlock[i][j] != 0 && cy + j < lockRow) lockRow = cy + j;
+        }
+    }
+    if (!isFinite(lockRow)) lockRow = cy;
+    return lockRow;
+}
+
+// A piece that can no longer move down is already in the board; start the ARE
+// pause instead of spawning its successor right away.
+function startAre() {
+    areTicks = areTicksForLock()
+    // The next piece starts its own gravity interval.
+    dropTicks = 0
+    lockTicks = 0
+    // Raw has no ARE: its successor is spawned on the lock frame, like the
+    // version before the movement refactor. genNextBlock() still settles the
+    // locked piece first (line clears, level-up, top-out). calcNext() draws the
+    // frame after this returns.
+    if (areTicks <= 0) {
+        areTicks = 0
+        gameLog("Piece locked. No ARE; spawning the next piece.")
+        genNextBlock()
+        return
+    }
+    gameLog("Piece locked. ARE: " + areTicks + " ticks.")
+}
+
+// True when the piece cannot move one cell down from where it stands.
+function isGrounded() {
+    deleteCurrentFromBoard()
+    var grounded = !testBlockPlace(currentBlock, cx, cy - 1)
+    addCurrentToBoard()
+    return grounded
+}
+
+// A downward move failed. Curves with a lock delay leave the piece where it is
+// and let updateLockDelay() decide when it locks. The others lock it, but only
+// when it was already resting when the frame began: a piece that lands during
+// the frame gets that frame to be slid or rotated, and locks on the next one.
+function pieceCouldNotMoveDown() {
+    if (lockDelay()) return
+    if (!restingAtFrameStart) return
+    startAre()
+}
+
+// Count the frames a grounded piece has spent waiting. The timer restarts when
+// the piece is no longer resting, and tryMove()/tryRotate() restart it earlier
+// for the curves that allow move or step resets.
+function updateLockDelay() {
+    var cfg = lockDelay()
+    if (!cfg || GameStopped || areTicks > 0) {
+        lockTicks = 0
+        return
+    }
+    if (!isGrounded()) {
+        lockTicks = 0
+        return
+    }
+    lockTicks++
+    if (lockTicks >= cfg.ticks) {
+        lockTicks = 0
+        startAre()
+    }
+}
+
+// True when a block is left in the hidden rows above the visible field. Those
+// rows only exist so pieces can spawn above the field; a block that stays
+// behind there once a piece has locked and the lines have cleared is a lock
+// out, and ends the game just like a spawn that no longer fits.
+function hasCellsAboveField() {
+    for (var i = 0; i < 10; i++) {
+        for (var j = 20; j < 25; j++) {
+            if (board[i][j] != 0) return true;
+        }
+    }
+    return false;
+}
+
+// Spawn the next piece, clear completed lines and detect a topped-out board:
+// a block left above the field or a new piece that cannot be placed at its
+// spawn location ends the game
 function genNextBlock() {
     var id = randomizer.next();
     var type = TYPES[id];
+    // The piece that just locked is still the current one; keep what Asuka's
+    // Kita detection needs, because the assignments below replace it.
+    var lockedBlock = currentBlock;
+    var lockedX = cx;
+    var lockedY = cy;
+    var lockedType = currentBlockType;
+    var lockedRotation = lastActionWasRotation;
+    lastActionWasRotation = false;
     currentBlock = nextBlock;
     currentBlockType = nextBlockType;
     nextBlockType = type;
     gameLog("Generated new block of type: " + nextBlockType);
     nextBlock = makeBlockInSpawnState(type);
-    cx = 3;
-    cy = 20;
+    // The rotation system decides how many hidden rows above the field the
+    // piece starts on, so the spawn origin is read from the rotation rules.
+    var origin = getSpawnOrigin(currentBlock);
+    cx = origin[0];
+    cy = origin[1];
+    lockTicks = 0;
+    gravityDemand = 0;
 
     var clearedLines = [];
 
@@ -1236,6 +801,27 @@ function genNextBlock() {
     score += scores[lineCount];
     line += lineCount;
     recordLineClear(lineCount);
+    // Asuka's Kita must be counted before the level-up rule runs, so the clear
+    // that opens a section stop can also be the one that passes it.
+    if (kitaTracking()) {
+        awardAsukaKita(clearedLines, lineCount, lockedType, lockedRotation,
+            lockedBlock, lockedX, lockedY);
+    }
+    if (difficulty().medalTracking) {
+        awardMasterMedals(clearedLines, lineCount, lockedType, lockedRotation,
+            lockedBlock, lockedX, lockedY);
+    }
+    // T-Spin bookkeeping for the stats panel. Runs while the completed rows are
+    // still on the board, like the Kita and medal rules above.
+    if (lockedType === "T" && lockedRotation && lineCount >= 1 && lineCount <= 3) {
+        var spinKind = classifyTSpinAtLock(lockedBlock, lockedX, lockedY);
+        if (spinKind) {
+            recordTSpin(spinKind, lineCount);
+            gameLog((spinKind === "mini" ? "Mini T-Spin " : "T-Spin ") +
+                ["", "Single", "Double", "Triple"][lineCount] + " recorded.");
+        }
+    }
+    updateLevelAfterLock(lineCount);
     for (var i = 0; i < 10; i++) {
         for (var it = lineCount - 1; it >= 0; it--) {
             for (var j = clearedLines[it] + 1; j < 25; j++) {
@@ -1247,20 +833,26 @@ function genNextBlock() {
     document.getElementById("score").textContent = score.toString();
     document.getElementById("count").textContent = line.toString();
 
-    // Test if any block is out of bound
-    for (var i = 0; i < 10; i++) {
-        for (var j = 20; j < 25; j++) {
-            if (board[i][j] != 0) {
-                GameFailed = true;
-                GameStopped = true;
-                break;
-            }
-        }
-        if (GameStopped) break;
-    }
+    // Two things end the game here, both checked after the clear so a line
+    // clearing under a stack can still rescue it. Lock out: a block is left in
+    // the hidden rows above the field. Block out: the new piece cannot be
+    // placed at its spawn location. The piece is written to the board either
+    // way, so the last piece shows up behind the failure message instead of the
+    // field stopping on the piece before it.
+    var lockOut = hasCellsAboveField();
+    var blockSize = currentBlock.length;
+    var spawnFits = blockSize === 0 || testBlockPlace(currentBlock, cx, cy, board);
+    if (blockSize > 0) recordSpawn(currentBlockType);
+    addBlockToBoard(board, currentBlock, cx, cy);
+    currentRotationState = getSpawnState(currentBlockType);
 
-    if (GameStopped) {
+    if (lockOut || !spawnFits) {
+        if (lockOut) gameLog("Lock out: a block was left above the visible field.");
+        if (!spawnFits) gameLog("Block out: the new piece cannot be placed at its spawn location.");
+        GameFailed = true;
+        GameStopped = true;
         stopTimer();
+        releaseAllDirs();
         document.getElementById("pauseBtn").value = "Pause";
         syncStartButton();
         draw();
@@ -1269,16 +861,6 @@ function genNextBlock() {
         alert("You have failed! Final score: " + score.toString());
         return;
     }
-
-    // Put new block in place
-    var blockSize = currentBlock.length;
-    if (blockSize > 0) recordSpawn(currentBlockType);
-    for (var i = 0; i < blockSize; i++) {
-        for (var j = 0; j < blockSize; j++) {
-            board[cx + i][cy + j] = currentBlock[i][j];
-        }
-    }
-    currentRotationState = getSpawnState(currentBlockType);
     refreshStatsIfVisible();
 }
 
@@ -1286,7 +868,9 @@ function genNextBlock() {
 function calcNext() {
     if (GameStopped) return
     requestQueue.forEach(i => {
-        if (GameStopped) return
+        // A lock may have started the ARE pause in an earlier iteration; the
+        // rest of the queue belongs to the piece that is no longer falling.
+        if (GameStopped || areTicks > 0) return
         if (i == 1) {
             tryMove(-1, 0)
         } else if (i == 2) {
@@ -1298,11 +882,11 @@ function calcNext() {
                 // A manual drop restarts gravity.
                 dropTicks = 0
             } else {
-                genNextBlock()
+                pieceCouldNotMoveDown()
             }
         } else if (i == 5) {
             if (!tryMove(0, -1)) {
-                genNextBlock()
+                pieceCouldNotMoveDown()
             }
         }
         if (GameStopped) return
@@ -1317,14 +901,64 @@ function calcNext() {
 // gravity always land in the same frame.
 function gameTick() {
     if (GameStopped) return
-    dropTicks++;
-    if (dropTicks >= DROP_TICKS) {
-        dropTicks = 0;
-        // A manual drop queued for this tick consumes the slot, so the piece
-        // never falls two cells in one tick.
-        if (requestQueue.indexOf(4) < 0) requestQueue.push(5);
+    // Sega's level timer counts every frame, including the ARE pause.
+    if (movement().levelTimer) segaLevelTimer++;
+    // ARE: a locked piece has been in the board since the last drop; hold the
+    // game still for areTicks so a held direction can be released before the
+    // next piece appears. Input during the pause is ignored.
+    if (areTicks > 0) {
+        areTicks--
+        if (areTicks === 0) {
+            requestQueue = []
+            genNextBlock()
+            draw()
+        }
+        return
+    }
+    // Record whether the piece was already resting on the stack when the frame
+    // began; input below is processed before gravity, so this is the honest
+    // frame-start state for the no-lock-delay grace rule.
+    restingAtFrameStart = isGrounded();
+    // Held directions queue their repeats before gravity, so the player's move
+    // lands in the same frame and ahead of the automatic drop.
+    processHeldDirs();
+    // The difficulty picks the falling curve. Accelerating curves (Modern, the
+    // Custom scale) ask for a fraction of a row per tick or for several rows;
+    // only whole rows are dropped and the fraction is kept for the next tick,
+    // so 20G moves 20 cells in one frame. The discrete curves drop whole cells
+    // on a fixed frame cadence instead.
+    var gravityCfg = difficulty().gravity;
+    if (gravityCfg.cellsPerTick) {
+        // 20G and above is clamped to 25 rows a frame; the piece then lands on
+        // the spawn tick instead of creeping down from above the field.
+        gravityDemand += clampGravitySpeed(gravityCfg.cellsPerTick(level));
+        // Adding a fraction such as 1/59 fifty-nine times can land a hair below
+        // the integer, so the floor gets a tiny tolerance.
+        var rows = Math.floor(gravityDemand + GRAVITY_EPSILON);
+        if (rows > 0) {
+            gravityDemand -= rows;
+            if (gravityDemand < GRAVITY_EPSILON) gravityDemand = 0;
+        }
+        if (requestQueue.indexOf(4) < 0) {
+            for (var r = 0; r < rows; r++) requestQueue.push(5);
+        }
+    } else {
+        dropTicks++;
+        // The frame cadence gets the same tolerance: a curve value a hair above
+        // the tick count (say 0.9999999 frames late) still fires on that tick.
+        if (dropTicks + GRAVITY_EPSILON >= gravityCfg.framesPerCell(level)) {
+            dropTicks = 0;
+            // A manual drop queued for this tick consumes the slot, so the
+            // piece never falls two cells in one tick.
+            if (requestQueue.indexOf(4) < 0) {
+                var cells = gravityCfg.cellsPerDrop ? gravityCfg.cellsPerDrop(level) : 1;
+                for (var c = 0; c < cells; c++) requestQueue.push(5);
+            }
+        }
     }
     calcNext();
+    // Curves with a lock delay count the frames a grounded piece waits.
+    updateLockDelay();
 }
 
 function startTimer() {
@@ -1351,6 +985,7 @@ function startGame() {
     if (kickSelect && WALL_KICK_TABLES.hasOwnProperty(kickSelect.value)) {
         gameRotationSystemName = kickSelect.value;
     }
+    readMovementConfig();
     // The select may have been changed after a game over (when
     // setRotationSystem() is still locked), so re-sync the checkbox here.
     refreshWallKickAvailability();
@@ -1395,18 +1030,23 @@ function resetGame() {
     GameStopped = true
     GameFailed = false
     dropTicks = 0
+    areTicks = 0
+    gravityDemand = 0
+    lockTicks = 0
     initBoard()
     currentBlock = []
     nextBlock = []
     currentBlockType = ""
     nextBlockType = ""
     requestQueue = []
+    releaseAllDirs()
     line = 0
     score = 0
     currentRotationState = "0"
-    nonIStreak = 0
-    longestNonIStreak = 0
+    IDrought = 0
+    maxIDrought = 0
     stats = { single: 0, double: 0, triple: 0, tetris: 0 }
+    tSpinStats = { single: 0, double: 0, triple: 0, miniSingle: 0, miniDouble: 0 }
     pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 }
     gameSeed = ""
     seedRevealPending = false
@@ -1419,6 +1059,8 @@ function resetGame() {
     if (kickSelect && WALL_KICK_TABLES.hasOwnProperty(kickSelect.value)) {
         gameRotationSystemName = kickSelect.value;
     }
+    readMovementConfig();
+    resetLevel();
     randomizer = RANDOMIZERS[gameRandomizerName]();
     setConfigEnabled(true)
     refreshWallKickAvailability()
@@ -1437,10 +1079,12 @@ function pauseGame() {
         GameStopped = false
         document.getElementById("pauseBtn").value = "Pause"
         requestQueue = []
+        releaseAllDirs()
         startTimer()
     } else {
         GameStopped = true
         document.getElementById("pauseBtn").value = "Unpause"
+        releaseAllDirs()
         stopTimer()
     }
 }
@@ -1455,6 +1099,7 @@ function abortGame() {
 
     GameFailed = true
     GameStopped = true
+    releaseAllDirs()
     stopTimer()
     revealSeed()
     document.getElementById("pauseBtn").value = "Pause"
@@ -1503,7 +1148,8 @@ function setConfigEnabled(enabled) {
     if (btn) btn.disabled = !enabled;
     var row = document.getElementById("configRow");
     if (row && !enabled) row.style.display = "none";
-    var ids = ["randomizerSelect", "rotationSystemSelect", "seedInput", "randomStartCheckbox"];
+    var ids = ["randomizerSelect", "rotationSystemSelect", "seedInput", "randomStartCheckbox",
+        "movementSelect", "difficultySelect", "startLevelInput"];
     for (var i = 0; i < ids.length; i++) {
         var el = document.getElementById(ids[i]);
         if (el) el.disabled = !enabled;
@@ -1553,6 +1199,119 @@ function setRandomStart(enabled) {
     refreshStatsIfVisible();
 }
 
+// Movement settings. The movement select and the difficulty select are
+// independent: the movement owns timing, lock delay and the level rules, while
+// the difficulty picks the falling-speed curve (and NES's CTWC variant or one of
+// Sega's four arcade tables). The start level box depends on both: the Custom
+// difficulty always spans -20 to 60, the standard ones use the movement's range.
+
+function refreshDifficultyOptions() {
+    var select = document.getElementById("difficultySelect");
+    var list = movement().difficulties;
+    var known = false;
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].id === gameDifficulty) known = true;
+    }
+    if (!known) gameDifficulty = movement().defaultDifficulty;
+    if (!select) return;
+    var html = "";
+    for (var k = 0; k < list.length; k++) {
+        html += '<option value="' + list[k].id + '"' +
+            (list[k].id === gameDifficulty ? " selected" : "") + ">" + list[k].name + "</option>";
+    }
+    select.innerHTML = html;
+}
+
+function refreshStartLevelField() {
+    var input = document.getElementById("startLevelInput");
+    var min = minStartLevel(), max = maxStartLevel();
+    if (gameStartLevel < min) gameStartLevel = min;
+    if (gameStartLevel > max) gameStartLevel = max;
+    if (!input) return;
+    input.min = String(min);
+    input.max = String(max);
+    input.value = String(gameStartLevel);
+}
+
+function setMovement(name) {
+    var select = document.getElementById("movementSelect");
+    if (!MOVEMENT_DEFINITIONS.hasOwnProperty(name)) return;
+    if (gameStarted) {
+        if (select) select.value = gameMovement;
+        return;
+    }
+    if (select) select.value = name;
+    if (gameMovement === name) return;
+    gameMovement = name;
+    // A different movement brings its own difficulties and start level range.
+    gameDifficulty = movement().defaultDifficulty;
+    gameStartLevel = modeStartLevel();
+    refreshDifficultyOptions();
+    refreshStartLevelField();
+    refreshStatsIfVisible();
+}
+
+function setDifficulty(id) {
+    var select = document.getElementById("difficultySelect");
+    if (gameStarted) {
+        if (select) select.value = gameDifficulty;
+        return;
+    }
+    var list = movement().difficulties, chosen = null;
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) chosen = list[i];
+    }
+    if (!chosen) return;
+    var wasCustom = isCustomDifficulty();
+    gameDifficulty = id;
+    if (select) select.value = id;
+    // Custom and standard levels mean different speeds, so refill the box when
+    // entering or leaving the Custom scale. Default/CTWC keep the typed level.
+    if (wasCustom !== isCustomDifficulty()) gameStartLevel = modeStartLevel();
+    refreshStartLevelField();
+    refreshStatsIfVisible();
+}
+
+function setStartLevel(value) {
+    if (gameStarted) {
+        refreshStartLevelField();
+        return;
+    }
+    var lv = parseInt(value, 10);
+    if (!isFinite(lv)) return;
+    gameStartLevel = Math.max(minStartLevel(), Math.min(lv, maxStartLevel()));
+    refreshStartLevelField();
+    refreshStatsIfVisible();
+}
+
+// Read the movement controls into the game settings; used when a game starts
+// and when the panel is re-synced after a reset.
+function readMovementConfig() {
+    var movementSelect = document.getElementById("movementSelect");
+    if (movementSelect && MOVEMENT_DEFINITIONS.hasOwnProperty(movementSelect.value)) {
+        gameMovement = movementSelect.value;
+    }
+    var list = movement().difficulties;
+    var valid = false;
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].id === gameDifficulty) valid = true;
+    }
+    if (!valid) gameDifficulty = movement().defaultDifficulty;
+    var difficultySelect = document.getElementById("difficultySelect");
+    if (difficultySelect) {
+        for (var k = 0; k < list.length; k++) {
+            if (list[k].id === difficultySelect.value) gameDifficulty = difficultySelect.value;
+        }
+    }
+    var levelInput = document.getElementById("startLevelInput");
+    if (levelInput) {
+        var chosenLevel = parseInt(levelInput.value, 10);
+        if (isFinite(chosenLevel)) {
+            gameStartLevel = Math.max(minStartLevel(), Math.min(chosenLevel, maxStartLevel()));
+        }
+    }
+}
+
 // Stats panel toggle
 function toggleStats() {
     var panel = document.getElementById("statsPanel");
@@ -1571,17 +1330,33 @@ function toggleStats() {
 
 var stats = { single: 0, double: 0, triple: 0, tetris: 0 };
 
+// T-Spins that cleared lines, split by the guideline labels. A three-line clear
+// can only be a proper T-Spin, so there is no Mini Triple counter.
+var tSpinStats = { single: 0, double: 0, triple: 0, miniSingle: 0, miniDouble: 0 };
+
+function recordTSpin(kind, lineCount) {
+    if (lineCount === 3) {
+        tSpinStats.triple++;
+    } else if (lineCount === 2) {
+        if (kind === "mini") tSpinStats.miniDouble++;
+        else tSpinStats.double++;
+    } else if (lineCount === 1) {
+        if (kind === "mini") tSpinStats.miniSingle++;
+        else tSpinStats.single++;
+    }
+}
+
 var pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 };
-var nonIStreak = 0;
-var longestNonIStreak = 0;
+var IDrought = 0;
+var maxIDrought = 0;
 
 function recordSpawn(type) {
     if (pieceCounts.hasOwnProperty(type)) pieceCounts[type]++;
     if (type === "I") {
-        nonIStreak = 0;
+        IDrought = 0;
     } else {
-        nonIStreak++;
-        if (nonIStreak > longestNonIStreak) longestNonIStreak = nonIStreak;
+        IDrought++;
+        if (IDrought > maxIDrought) maxIDrought = IDrought;
     }
 }
 
@@ -1597,10 +1372,40 @@ function tetrisRate() {
     return lines === 0 ? 0 : stats.tetris * 4 / lines * 100;
 }
 
+// Format a cells-per-frame value as a G figure, reducing the fraction so the
+// custom practice difficulties can show the exact speed of the frozen level.
+function formatGravity(cellsPerTick) {
+    if (!cellsPerTick) return "0";
+    if (Math.abs(cellsPerTick - Math.round(cellsPerTick)) < 1e-9) {
+        return Math.round(cellsPerTick) + " G";
+    }
+    // Prefer the 1/65536 G grid (TGM3 Master, TGM4 Marathon); fall back to the
+    // 1/256 G grid the other curves use, and to decimals when the reduced
+    // fraction would be too unwieldy (Marathon's 1/65536 values).
+    var num = Math.round(cellsPerTick * 65536);
+    var den = 65536;
+    if (Math.abs(num / den - cellsPerTick) > 1e-9) {
+        num = Math.round(cellsPerTick * 256);
+        den = 256;
+    }
+    var a = num, b = den;
+    while (b) {
+        var t = a % b;
+        a = b;
+        b = t;
+    }
+    num /= a;
+    den /= a;
+    if (den > 256) return (Math.round(cellsPerTick * 100) / 100) + " G";
+    return num + "/" + den + " G";
+}
+
 function refreshStats() {
     var mode = document.getElementById("statsMode")
     var rnd = document.getElementById("statsRandomizer");
     var wk = document.getElementById("statsRotationSystem");
+    var movementEl = document.getElementById("statsMovement");
+    var ss = document.getElementById("statsStartLevel");
     var sc = document.getElementById("statsScore");
     var pieces = document.getElementById("statsPieces");
     var streak = document.getElementById("statsStreak");
@@ -1612,7 +1417,48 @@ function refreshStats() {
     var kickDisabled = !wallKickEnabled && rotationSystemSupportsWallKick(gameRotationSystemName);
     if (wk) wk.textContent = "Rotation System: " + (ROTATION_SYSTEM_NAMES[gameRotationSystemName] || gameRotationSystemName) +
         (kickDisabled ? " (no wall kick)" : "");
-    if (sc) sc.textContent = "Score: " + score + "  Lines: " + line;
+    if (movementEl) {
+        var movementText = "Movement: " + movement().name;
+        if (difficulty().name !== "Default") movementText += " (" + difficulty().name + ")";
+        movementEl.textContent = movementText;
+    }
+    if (ss) {
+        if (isCustomDifficulty()) {
+            if (gameStartLevel >= 60) {
+                ss.textContent = "Speed: 1 G";
+            } else if (gameStartLevel > 0) {
+                ss.textContent = "Speed: 1/" + (61 - gameStartLevel) + " G";
+            } else if (gameStartLevel < 0) {
+                ss.textContent = "Speed: " + (-gameStartLevel) + " G";
+            } else {
+                ss.textContent = "Speed: 0";
+            }
+        } else if (difficulty().customMode) {
+            // The level is frozen, so show the speed the original mode has there.
+            ss.textContent = "Start Level: " + gameStartLevel + "  Speed: " +
+                formatGravity(difficulty().gravity.cellsPerTick(gameStartLevel));
+        } else {
+            ss.textContent = "Start Level: " + gameStartLevel;
+        }
+    }
+    if (sc) {
+        sc.textContent = "Level: " + level + "  Lines: " + line + "  Score: " + score;
+        // Asuka gates each section on a Kita, so the counter has to be visible.
+        if (kitaTracking()) sc.textContent += "  Kita: " + sectionKitas;
+    }
+    var tsp = document.getElementById("statsTSpins");
+    if (tsp) {
+        tsp.textContent = "T-Spins: " +
+            "  Single: " + tSpinStats.single +
+            "  Double: " + tSpinStats.double +
+            "  Triple: " + tSpinStats.triple;
+    }
+    var mtsp = document.getElementById("statsMiniTSpins");
+    if (mtsp) {
+        mtsp.textContent = "Mini T-Spins: " +
+            "  Single: " + tSpinStats.miniSingle +
+            "  Double: " + tSpinStats.miniDouble;
+    }
     var sd = document.getElementById("statsSeed");
     if (sd) {
         if (seedRevealPending && !GameFailed) {
@@ -1626,7 +1472,7 @@ function refreshStats() {
         "  L: " + pieceCounts.L + "  O: " + pieceCounts.O +
         "  S: " + pieceCounts.S + "  T: " + pieceCounts.T +
         "  Z: " + pieceCounts.Z;
-    if (streak) streak.textContent = "Non-I streak: " + nonIStreak + "  Max: " + longestNonIStreak;
+    if (streak) streak.textContent = "I Drought: " + IDrought + "  Max: " + maxIDrought;
     if (!counts || !rate) return;
     counts.textContent = "Single: " + stats.single + "  Double: " + stats.double +
         "  Triple: " + stats.triple + "  Tetris: " + stats.tetris;
@@ -1671,11 +1517,128 @@ function requestRight() {
     requestQueue.push(2)
 }
 
+// Queue one movement for a held direction; picked up by calcNext() this tick.
+function queueHeldMove(dir) {
+    if (dir === "left") requestLeft()
+    else if (dir === "right") requestRight()
+    else if (dir === "rotate") requestUp()
+    else requestDown()
+}
+
+// Pressing a direction always moves once right away; the repeat comes later.
+function pressDir(dir) {
+    if (GameStopped) return
+    var state = heldDirs[dir]
+    if (!state || state.pressed) return
+    state.pressed = true
+    state.ticks = 0
+    if (dir === "left" || dir === "right") lastHeldDir = dir
+    queueHeldMove(dir)
+}
+
+function releaseDir(dir) {
+    var state = heldDirs[dir]
+    if (!state || !state.pressed) return
+    state.pressed = false
+    state.ticks = 0
+    if (lastHeldDir === dir) {
+        lastHeldDir = heldDirs.right.pressed ? "right" : (heldDirs.left.pressed ? "left" : null)
+    }
+}
+
+// Drop every held direction. Needed on pause, game over, focus loss and when
+// the on-screen buttons are rebuilt: a lost keyup/pointerup would otherwise
+// keep the piece moving forever.
+function releaseAllDirs() {
+    ["left", "right", "down", "rotate"].forEach(function (dir) {
+        heldDirs[dir].pressed = false
+        heldDirs[dir].ticks = 0
+    })
+    lastHeldDir = null
+}
+
+// Turn the currently held directions into queued moves for this tick.
+function processHeldDirs() {
+    if (GameStopped) return
+
+    // Raw movement leaves auto-shift to the operating system's key repeat: the
+    // keyboard listener queues every repeat itself, and an on-screen button is
+    // one move per press, so there is nothing to synthesise here.
+    if (movement().nativeRepeat) return
+
+    // With both horizontal directions held, the one pressed last wins.
+    var dir = null
+    if (heldDirs.left.pressed && heldDirs.right.pressed) dir = lastHeldDir || "left"
+    else if (heldDirs.left.pressed) dir = "left"
+    else if (heldDirs.right.pressed) dir = "right"
+
+    if (dir) {
+        var state = heldDirs[dir]
+        state.ticks++
+        if (state.ticks >= dasTicks() && (state.ticks - dasTicks()) % arrTicks() === 0) {
+            queueHeldMove(dir)
+        }
+    }
+
+    if (heldDirs.down.pressed) {
+        heldDirs.down.ticks++
+        if (heldDirs.down.ticks % softDropTicks() === 0) requestDown()
+    }
+
+    // Modern and the TGM series repeat rotation while the key is held. It uses
+    // the same shape as DAS: nothing repeats until the charge has elapsed, then
+    // one rotation every rotateTicks(). Rotating restarts the lock delay, so
+    // holding rotate is how a piece is kept alive at high speed.
+    if (heldDirs.rotate.pressed && rotateTicks() > 0) {
+        heldDirs.rotate.ticks++
+        var rotateCharge = dasTicks()
+        if (heldDirs.rotate.ticks >= rotateCharge &&
+            (heldDirs.rotate.ticks - rotateCharge) % rotateTicks() === 0) requestUp()
+    }
+}
+
 //#endregion
 
 //#region Mobile Compatibility
 
 var vBtnShown = false
+
+// On-screen button handlers. Pointer events fire on touch-down instead of
+// touch-up, so holding a button drives the same auto-shift as a held key. The
+// pointer capture keeps sending pointerup even if the finger slides off the
+// button, which is what stops a piece from moving forever.
+
+function vbtnDown(action, evt) {
+    if (evt) {
+        evt.preventDefault()
+        var el = evt.currentTarget
+        if (el && el.setPointerCapture && evt.pointerId !== undefined) {
+            try { el.setPointerCapture(evt.pointerId) } catch (e) { }
+        }
+    }
+    pressDir(action)
+}
+
+function vbtnUp(action, evt) {
+    if (evt) evt.preventDefault()
+    releaseDir(action)
+}
+
+// Inline attributes for a direction button: pointer handlers where supported,
+// the old click-only behaviour as a fallback for browsers without them.
+function vbtnDirAttrs(action) {
+    if (!window.PointerEvent) {
+        var handler = action === "rotate" ? "requestUp()"
+            : (action === "down" ? "requestDown()" : (action === "left" ? "requestLeft()" : "requestRight()"))
+        return ' onclick="' + handler + '"'
+    }
+    var name = "'" + action + "', event"
+    return ' onpointerdown="vbtnDown(' + name + ')"'
+        + ' onpointerup="vbtnUp(' + name + ')"'
+        + ' onpointercancel="vbtnUp(' + name + ')"'
+        + ' onlostpointercapture="vbtnUp(' + name + ')"'
+        + ' oncontextmenu="return false"'
+}
 
 function showVirtualBtns() {
     if (!gl) return;
@@ -1690,15 +1653,18 @@ function showVirtualBtns() {
     var btnSize = "" + Math.floor(120 * currentScale)
     var fontSize = "" + Math.floor(40 * currentScale)
 
+    // The buttons are about to be replaced, so any hold on them is gone.
+    releaseAllDirs()
+
     if (vBtnShown) {
         var vBtn =
-            '<input type="button" id="mobileStartBtn" onclick="startButtonAction()" value="' + (!gameStarted ? "S" : (GameFailed ? "R" : "A")) + '" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
-            '<input type="button" onclick="requestUp()" value="&uarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
-            '<input type="button" onclick="pauseGame()" value="P" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" id="mobileStartBtn" class="vbtn" onclick="startButtonAction()" value="' + (!gameStarted ? "S" : (GameFailed ? "R" : "A")) + '" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" class="vbtn"' + vbtnDirAttrs("rotate") + ' value="&uarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" class="vbtn" onclick="pauseGame()" value="P" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
             '<br/>\n' +
-            '<input type="button" onclick="requestLeft()" value="&larr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
-            '<input type="button" onclick="requestDown()" value="&darr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
-            '<input type="button" onclick="requestRight()" value="&rarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>'
+            '<input type="button" class="vbtn"' + vbtnDirAttrs("left") + ' value="&larr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" class="vbtn"' + vbtnDirAttrs("down") + ' value="&darr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>\n' +
+            '<input type="button" class="vbtn"' + vbtnDirAttrs("right") + ' value="&rarr;" style="width:' + btnSize + 'px;height:' + btnSize + 'px;font-size:' + fontSize + 'px"/>'
         document.getElementById("btnBox").innerHTML = vBtn
     } else {
         document.getElementById("btnBox").innerHTML = ""
@@ -1735,6 +1701,8 @@ window.onload = function init() {
     currentScale = globalScale;
 
     refreshWallKickAvailability();
+    refreshDifficultyOptions();
+    refreshStartLevelField();
     setCanvas();
     initBoard();
     draw();
@@ -1742,25 +1710,50 @@ window.onload = function init() {
     if(windowWidth < windowHeight) showVirtualBtns();
 };
 
-document.onkeydown = function keydown(evt) {
-    var handled = true;
+// Map an arrow key to the input action it triggers.
+function arrowAction(evt) {
     switch (evt.key) {
-        case "ArrowUp":
-            requestUp();
-            break;
-        case "ArrowDown":
-            requestDown();
-            break;
-        case "ArrowLeft":
-            requestLeft();
-            break;
-        case "ArrowRight":
-            requestRight();
-            break;
-        default:
-            handled = false;
+        case "ArrowUp": return "rotate";
+        case "ArrowDown": return "down";
+        case "ArrowLeft": return "left";
+        case "ArrowRight": return "right";
     }
-    if (handled) evt.preventDefault();
+    return null;
 }
+
+document.onkeydown = function keydown(evt) {
+    var action = arrowAction(evt);
+    if (!action) return;
+    evt.preventDefault();
+    // Raw movement trusts the operating system's key repeat: every keydown,
+    // the first and each repeated one, queues exactly one action. This is the
+    // old version's feel; no DAS or ARR is involved.
+    if (movement().nativeRepeat) {
+        queueHeldMove(action);
+        return;
+    }
+    // The other movements ignore the repeat flag: auto-shift generates the
+    // repeats from processHeldDirs() instead, so the rate is the game's own.
+    if (evt.repeat) return;
+    pressDir(action);
+};
+
+document.onkeyup = function keyup(evt) {
+    var action = arrowAction(evt);
+    if (!action) return;
+    evt.preventDefault();
+    releaseDir(action);
+};
+
+// A keyup or pointerup never arrives when the page loses focus (tab switch,
+// task switch, an incoming call, a native dialog). Releasing here prevents a
+// direction from being stuck down after the page comes back.
+window.onblur = function () {
+    releaseAllDirs();
+};
+
+document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") releaseAllDirs();
+});
 
 //#endregion

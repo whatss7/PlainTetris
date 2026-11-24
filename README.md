@@ -1,51 +1,73 @@
 # Plain Tetris
 
-[Try it out! This supports mobile device too!](https://whatss7.github.io/PlainTetris/)
+[Try it out! This supports mobile devices too!](https://whatss7.github.io/PlainTetris/)
 
 This is a simple Tetris program based on WebGL.
 
-You can choose rotation system and randomizer for the tetris game.
+## Configs
 
-## Features
+### Randomizers
 
-- Ghost piece, next piece preview, score and line count.
-- Config panel with randomizer, rotation system, wall kick toggle, random start and seed. Settings are locked while a game is running.
-- Random Start mode fills the bottom 8 rows with 9, 8, ..., 2 random cells.
-- A seed reproduces the same piece sequence and the same random start.
-- Stats panel: line clear counts, tetris rate, piece counts, longest non-I streak, and the randomizer / rotation system of the current game (the seed is shown once the game ends).
-- Keyboard and on-screen buttons for mobile.
-
-This tetris will not accelerate as game proceeds.
-
-## Randomizers
+The randomizer config decides the order in which the seven pieces arrive. Every randomizer is seeded, so one seed reproduces the same piece sequence.
 
 | Randomizer | Description |
 | --- | --- |
-| N-bag | Bags of n pieces is shuffled and used in order; A new bag is generated when the last piece is used. |
-| NES | Rolls 0-7 for a piece; if the piece is the same as the previous one or the piece is dummy 7, it is rerolled in 0-6. |
-| Game Boy | Pieces are compared as 3-bit vectors; a piece is rerolled while it and the previous piece are subsets of the one before (up to 3 draws). Piece distribution is not uniform. |
+| N-bag | A bag of N pieces is shuffled and dealt in order; a new bag is generated when the last piece of the current one is used. |
+| NES | Rolls 0-7 to choose a piece; if the result is the same as the previous piece or is the dummy value 7, it is rerolled in 0-6. |
+| Game Boy | Pieces are compared as 3-bit vectors; a piece is rerolled while both it and the previous piece are subsets of the piece before the previous one (up to 3 draws). The piece distribution is not uniform. |
 | Sega | A 32-bit LCG generates a 1000-piece sequence from the seed; the sequence repeats every 1000 pieces. |
-| Arika TGM | First piece is I, J, L or T; up to 4 draws while the piece is in the last-4 history. |
+| Arika TGM | The first piece is I, J, L or T; after that, up to 4 draws are made until the piece is not in the four-piece history. |
 | Arika TGM2 | Same as TGM with a 6-draw limit and a different initial history. |
-| Arika TGM3 | Dynamic 35-piece pool; first piece is I, J, L or T; up to 6 draws avoiding the recent history. |
+| Arika TGM3 | A dynamic 35-piece pool; the first piece is I, J, L or T; up to 6 draws avoiding the recent history. |
 | Uniform | Every piece is drawn uniformly at random. |
 
-## Rotation Systems
+Leave "Seed" empty for a random seed; the stats panel reveals the seed that was used after the game ends, so the run can be replayed.
+
+### Rotation Systems
+
+Spawn position is part of the rotation system.
 
 | System | Description |
 | --- | --- |
-| SRS | Guideline standard: pure rotation with the full wall kick tables, including floor kicks. |
+| SRS | Guideline standard. Pure rotation with the full wall kick tables. |
 | NES | Nintendo's rotation system as used on the NES. No wall kicks. |
 | Game Boy | Nintendo's rotation system as used on the Game Boy. No wall kicks. |
 | Sega | Sega's 1988 arcade rotation: flat side up and bottom-aligned when rotating. No wall kicks. |
-| Arika | Sega-derived TGM rotation. Right kick is tried first, the I piece never kicks, and a rotation is refused when its first collision is in the centre column. |
+| Arika | Sega-derived TGM rotation. Right kick is tried first, the I piece never kicks, and a rotation is refused when the first colliding cell of the rotated piece is in the centre column. |
+| Arika TGM3 | Same as Arika, but with additional wall and floor kicks for the I and T pieces. |
 | Arika SRS | SRS with Arika's symmetric I-piece kicks, so symmetric four-line clears work in both directions. |
-| Tetris 64 | Four distinct states per piece rotating. O piece moves when rotated. Left kick is tried first. |
+| Tetris 64 | Four distinct rotation states per piece. The O piece moves when rotated. The left kick is tried first. |
 
 Wall kicks can be disabled for systems that support them by unchecking "Enable Wall Kick".
 
-The project is licensed by MIT License with following exceptions:
+### Movement
+
+The movement config sets the speed curve and the basic rules that differ between games: DAS, ARR, soft drop, ARE and lock delay. Line-clear ARE is not modelled separately from the normal ARE.
+
+| System | Description |
+| --- | --- |
+| Modern | Guideline movement: 10-frame DAS, 1/2G ARR, 1/2G soft drop, 2-frame ARE, 30-frame lock delay with move reset (rotating in place does not hold the piece), and rotation repeats while the key is held. |
+| NES | 16-frame DAS, 1/6G ARR, 1/2G soft drop, ARE grows from 10 to 18 frames with the lock row, and no lock delay. |
+| Game Boy | 24-frame DAS, 1/9G ARR, 1/3G soft drop, 2-frame ARE, and no lock delay. |
+| Sega | 20-frame DAS, 1G ARR, 1G soft drop, 30-frame ARE, and a 30-frame lock delay with step reset. |
+| Arika TGM | Tetris The Grand Master movement: 16-frame DAS, 1/2G ARR, 1/2G soft drop, 30-frame ARE, 30-frame lock delay with move reset, and rotation repeats while the key is held. |
+| Arika TGM2 | Movement system of Tetris The Absolute The Grand Master 2; varies for different game modes. |
+| Arika TGM3 | Movement system of Tetris The Grand Master 3 Terror-Instinct; varies for different game modes. |
+| Arika TGM4 | Movement system of Tetris The Grand Master 4 Absolute Eye; varies for different game modes. |
+| Raw (not recommended) | Every keydown the browser sends, repeats included, is one move or rotation, so DAS and ARR follow the browser's key repeat and an on-screen button moves exactly once per press. No ARE or lock delay. |
+
+Note that a movement system does not imply the corresponding game mode. For example, the Arika TGM4 Master difficulty does not have features from the original game such as Pikii and Cyclone. Some per-game rule details such as TGM4's 8 move / 2 rotation reset limit are also not modelled: this project never imposes a reset limit.
+
+Hard drop, sonic drop and hold are popular in modern Tetris games but are not implemented here: pieces can only be moved sideways, soft-dropped and rotated.
+
+Rotation auto-repeat differs from the TGM arcade games: they do not repeat the rotate key, but this project does. IRS (holding rotate as a piece spawns) is not implemented — pre-rotation would be awkward when rotation only turns clockwise — so the repeat makes up for it.
+
+A "Custom" difficulty replaces the movement's speed curve with a level-controlled fall speed, while Arika TGM2, TGM3 and TGM4 instead offer per-mode "Fixed" variants that freeze the level and keep the mode's own speed and delays.
+
+## Licensing
+
+The project is licensed under the MIT License with the following exceptions:
 
 The file `webgl-utils.js` is copyrighted 2010 Google Inc. and is licensed under the BSD-3-Clause License. See the header comments in that file for full license text and conditions.
 
-`initShaders()` and `flatten()` modified from [Edward Angel's demo](https://www.cs.unm.edu/~angel/WebGL/), which is licensed by MIT License.
+`initShaders()` and `flatten()` are modified from [Edward Angel's demo](https://www.cs.unm.edu/~angel/WebGL/), which is licensed by MIT License.
