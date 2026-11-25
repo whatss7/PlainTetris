@@ -57,6 +57,34 @@ function segaFramesPerCell(difficultyId, lv) {
     return table[Math.min(lv, table.length - 1)];
 }
 
+// Tetris DX (Game Boy Color) marathon curve, frames per cell for levels 0-20.
+var TETRIS_DX_GRAVITY = [
+    52, 48, 44, 40, 36, 32, 27, 21, 16, 10,  // 0-9
+    9, 8, 7, 6, 5, 5, 4, 4, 3, 3,            // 10-19
+    2                                        // 20
+];
+
+function tetrisDxFramesPerCell(lv) {
+    return TETRIS_DX_GRAVITY[Math.min(lv, TETRIS_DX_GRAVITY.length - 1)];
+}
+
+// Tetris DX's lock delay: 32 frames, or four frames more than the current
+// falling speed when that is slower (so the start of a game waits 36 to 56
+// frames per lock).
+function tetrisDxLockTicks(lv) {
+    return Math.max(32, tetrisDxFramesPerCell(lv) + 4);
+}
+
+// The game's real ARE is only the three frames of the lock animation: the next
+// piece is in play that soon and can be moved, turned or soft dropped at once.
+// The rest of the lock delay is an entry delay, during which the piece hangs at
+// the spawn position without being pulled down; input cancels it.
+var TETRIS_DX_ARE = 3;
+
+function tetrisDxEntryHold(lv) {
+    return Math.max(0, tetrisDxLockTicks(lv) - TETRIS_DX_ARE);
+}
+
 // TGM1 internal gravity in units of 1/256 G. A value applies from its level up
 // to the level before the next entry, so levels 90-99 all fall at 64/256G. The
 // curve drops sharply at level 200 and again at 420, and reaches 20G at 500.
@@ -753,6 +781,26 @@ var MOVEMENT_DEFINITIONS = {
             customDifficulty()
         ]
     },
+    tdx: {
+        name: "Tetris DX",
+        // DAS 9 frames of startup and 3 frames of repeat; the soft drop rate is
+        // not documented, so it uses the Game Boy's two-frame interval.
+        das: 9, arr: 3, softDrop: 2, rotate: 0,
+        // Only the lock animation is ARE; the rest of the lock delay is an entry
+        // delay that holds gravity off the new piece until input cancels it.
+        are: function () { return TETRIS_DX_ARE; },
+        entryHold: tetrisDxEntryHold,
+        cancelAre: true,
+        lockDelay: { ticks: function (lv) { return tetrisDxLockTicks(lv); }, reset: "step" },
+        startLevel: { min: 0, max: 20, default: 0 },
+        firstLevelLine: function (startLevel) { return startLevel * 10 + 10; },
+        levelUp: lineLevelUp(20),
+        defaultDifficulty: "default",
+        difficulties: [
+            { id: "default", name: "Default", gravity: { framesPerCell: tetrisDxFramesPerCell } },
+            customDifficulty()
+        ]
+    },
     sega: {
         name: "Sega",
         das: 20, arr: 1, softDrop: 1, rotate: 0,
@@ -1057,7 +1105,29 @@ function initialRotationEnabled() {
 function lockDelay() {
     var timing = levelTiming();
     if (timing) return { ticks: timing.lock, reset: "move" };
-    return movement().lockDelay || null;
+    var cfg = movement().lockDelay;
+    if (!cfg) return null;
+    // Tetris DX's delay shrinks with the level, so ticks may be a function of it.
+    if (typeof cfg.ticks === "function") {
+        return { ticks: cfg.ticks(level), reset: cfg.reset };
+    }
+    return cfg;
+}
+
+// Whether the entry delay the current movement asks for may be cancelled by
+// input (Tetris DX: any move, turn or soft drop brings the next piece in at
+// once instead of waiting the delay out).
+function areCanBeCancelled() {
+    return !!movement().cancelAre;
+}
+
+// Frames of entry delay asked for after a lock: the piece is already in play,
+// but gravity leaves it alone this long. Tetris DX is the only movement that
+// uses it, and its delay shrinks with the level, so the value may be a function.
+function entryHoldFrames() {
+    var spec = movement().entryHold;
+    if (!spec) return 0;
+    return typeof spec === "function" ? spec(level) : spec;
 }
 
 // Lowest selectable start level: the Custom difficulty counts cells per frame

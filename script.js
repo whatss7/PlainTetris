@@ -30,8 +30,34 @@ var board = [];
 var currentBlock = [];
 var nextBlock = [];
 
-// Input queue and the state of the current session
+// Input queue and the state of the current session. One entry per queued
+// action, played back in order by calcNext() at the end of the frame.
 var requestQueue = [];
+
+// The actions the queue can hold. A "down" is the key press itself (or the first
+// press of a held on-screen button); "down repeat" is every further key the hold
+// generates. The press always locks a resting piece, a repeat only under the
+// Locking Soft Drop setting (see pieceCouldNotMoveDown()).
+var REQUEST = {
+    LEFT: 0,
+    RIGHT: 1,
+    ROTATE_CW: 2,
+    ROTATE_CCW: 3,
+    DOWN: 10,
+    DOWN_REPEAT: 11,
+    AUTO_DOWN: 12
+};
+
+// What asked a piece to move down, passed to pieceCouldNotMoveDown(): the three
+// sources obey different rules.
+var DROP_SOURCE = {
+    PRESS: "press",
+    REPEAT: "repeat",
+    GRAVITY: "gravity"
+};
+
+// Most actions one frame will play back.
+var REQUEST_QUEUE_LIMIT = 8;
 
 // Directions currently held down, for auto-shift. `ticks` counts game-loop
 // ticks since the press and drives the repeat timing.
@@ -64,6 +90,9 @@ var gameRandom = Math.random;
 var gameSeed = "";
 var seedRevealPending = false;
 var randomStartEnabled = false;
+// Whether the repeats a held down key generates may lock a resting piece. A press
+// of the key always locks, whatever this says.
+var lockingSoftDropEnabled = false;
 
 // Timer: a single interval drives the whole game.
 var gameTimer = null;
@@ -76,6 +105,10 @@ var areTicks = 0;
 var gravityDemand = 0;
 // Frames the piece has spent resting on the stack while its lock delay runs.
 var lockTicks = 0;
+// Frames of entry delay left for the piece that is in play: while it is above
+// zero gravity does not pull the piece down, but the player can already move,
+// turn or soft drop it, and any of those ends the delay (Tetris DX only).
+var entryHoldLeft = 0;
 // Whether the piece was already resting on the stack when the current frame
 // began. Games without a lock delay use it to give a landing piece one frame
 // of grace before it locks.
@@ -608,6 +641,9 @@ function tryRotate(direction) {
         currentRotationState = placement.rotation;
         lastKickOffset = [placement.kick[0], placement.kick[1]];
         lastActionWasRotation = true;
+        // Tetris DX's alternate center also restarts the gravity timer, which is
+        // what turns a piece turned back and forth in a corner into its infinity.
+        if (placement.index > 0 && rotationSystemKickResetsGravity()) dropTicks = 0;
         // Move-reset curves restart the lock delay on a successful turn,
         // but only when the turn actually changes the occupied cells: an O
         // piece turning in place must not keep the timer alive. Step-reset
@@ -695,6 +731,7 @@ function initGame() {
     areTicks = 0
     gravityDemand = 0
     lockTicks = 0
+    entryHoldLeft = 0
     resetLevel()
     iDrought = 0
     maxIDrought = 0
@@ -754,9 +791,16 @@ function startAre() {
         areTicks = 0
         gameLog("Piece locked. No ARE; spawning the next piece.")
         genNextBlock()
+        beginEntryHold()
         return
     }
     gameLog("Piece locked. ARE: " + areTicks + " ticks.")
+}
+
+// Start the entry delay that follows a lock: the piece is in play, but gravity
+// leaves it alone for entryHoldFrames() frames unless the player acts first.
+function beginEntryHold() {
+    entryHoldLeft = entryHoldFrames()
 }
 
 // True when the piece cannot move one cell down from where it stands.
@@ -767,19 +811,51 @@ function isGrounded() {
     return grounded
 }
 
-// A downward move failed. Curves with a lock delay leave the piece where it is
-// and let updateLockDelay() decide when it locks. The others lock it, but only
-// when it was already resting when the frame began: a piece that lands during
-// the frame gets that frame to be slid or rotated, and locks on the next one.
-function pieceCouldNotMoveDown() {
+// A downward move failed. What asked for it decides what happens, so a source is
+// always passed: the press itself, one of the repeats a held key generates, or
+// gravity.
+function pieceCouldNotMoveDown(source) {
+    // The player pressed the key: that is a deliberate enough action to end the
+    // piece at once, whatever is left of its lock delay.
+    if (source === DROP_SOURCE.PRESS) {
+        startAre()
+        return
+    }
+    // A repeat is a key the player is still holding, not a new decision. It locks
+    // only under the Locking Soft Drop rule, so with the default setting a soft
+    // drop that runs into the floor leaves the piece there.
+    if (source === DROP_SOURCE.REPEAT) {
+        if (lockingSoftDropEnabled) startAre()
+        return
+    }
+    // Gravity's own landing: without a lock delay the piece is in the board, with
+    // one it waits for the timer.
     if (lockDelay()) return
     if (!restingAtFrameStart) return
     startAre()
 }
 
+// True when this tick's queue already contains a soft drop, either the key press
+// itself or one of the repeats it generated. The drop curves use it so that the
+// piece does not fall a second cell in the same tick.
+function softDropQueued() {
+    return requestQueue.indexOf(REQUEST.DOWN) >= 0 || requestQueue.indexOf(REQUEST.DOWN_REPEAT) >= 0
+}
+
+// True while the player is pressing or holding an action key; used by the entry
+// delays that input can cancel.
+function playerIsInputting() {
+    if (requestQueue.length > 0) return true
+    if (heldDirs.left.pressed || heldDirs.right.pressed || heldDirs.down.pressed) return true
+    return heldDirs.rotate.pressed || heldDirs.rotateCCW.pressed
+}
+
 // Count the frames a grounded piece has spent waiting. The timer restarts when
 // the piece is no longer resting, and tryMove()/tryRotate() restart it earlier
-// for the curves that allow move or step resets.
+// for the curves that allow move or step resets. Step-reset curves are the
+// exception to the first rule: they keep their count while the piece hangs over
+// air, so a piece swung back and forth at the edge of a ledge spends the same
+// clock it would spend standing on it instead of resetting it every swing.
 function updateLockDelay() {
     var cfg = lockDelay()
     if (!cfg || GameStopped || areTicks > 0) {
@@ -787,7 +863,7 @@ function updateLockDelay() {
         return
     }
     if (!isGrounded()) {
-        lockTicks = 0
+        if (cfg.reset !== "step") lockTicks = 0
         return
     }
     lockTicks++
@@ -935,38 +1011,54 @@ function genNextBlock() {
     refreshStatsIfVisible();
 }
 
-// 1 left 2 right 3 rotate CW 4 down 5 auto-down 6 rotate CCW
+// Play this frame's queue back in the order the actions arrived. The queue is
+// only as long as it was when the frame began: a lock started by one request
+// means the rest belong to a piece that is no longer falling.
 function calcNext() {
     if (GameStopped) return
-    requestQueue.forEach(i => {
-        // A lock may have started the ARE pause in an earlier iteration; the
-        // rest of the queue belongs to the piece that is no longer falling.
-        if (GameStopped || areTicks > 0) return
-        if (i == 1) {
-            tryMove(-1, 0)
-        } else if (i == 2) {
-            tryMove(1, 0)
-        } else if (i == 3) {
-            tryRotate("cw")
-        } else if (i == 6) {
-            tryRotate("ccw")
-        } else if (i == 4) {
-            if (tryMove(0, -1)) {
-                // A manual drop restarts gravity.
-                dropTicks = 0
-            } else {
-                pieceCouldNotMoveDown()
-            }
-        } else if (i == 5) {
-            if (!tryMove(0, -1)) {
-                pieceCouldNotMoveDown()
-            }
-        }
-        if (GameStopped) return
-    });
+    var queued = requestQueue.length
+    for (var i = 0; i < queued; i++) {
+        // A lock may have started the ARE pause on an earlier request.
+        if (GameStopped || areTicks > 0) break
+        applyRequest(requestQueue[i])
+    }
     requestQueue = []
     if (GameStopped) return
     draw()
+}
+
+// Carry out one queued action. Anything that turns into a downward move counts
+// as a manual drop and restarts gravity.
+function applyRequest(request) {
+    switch (request) {
+        case REQUEST.LEFT:
+            tryMove(-1, 0)
+            break
+        case REQUEST.RIGHT:
+            tryMove(1, 0)
+            break
+        case REQUEST.ROTATE_CW:
+            tryRotate("cw")
+            break
+        case REQUEST.ROTATE_CCW:
+            tryRotate("ccw")
+            break
+        case REQUEST.DOWN:
+            // The press always ends a resting piece at once.
+            if (tryMove(0, -1)) dropTicks = 0
+            else pieceCouldNotMoveDown(DROP_SOURCE.PRESS)
+            break
+        case REQUEST.DOWN_REPEAT:
+            // A repeat only moves the piece, unless the Locking Soft Drop rule is
+            // in force, in which case a blocked repeat locks like the press does.
+            if (tryMove(0, -1)) dropTicks = 0
+            else pieceCouldNotMoveDown(DROP_SOURCE.REPEAT)
+            break
+        case REQUEST.AUTO_DOWN:
+            // Gravity keeps the movement's own landing rule.
+            if (!tryMove(0, -1)) pieceCouldNotMoveDown(DROP_SOURCE.GRAVITY)
+            break
+    }
 }
 
 // One tick of the game: the automatic drop request is queued first when the
@@ -978,12 +1070,22 @@ function gameTick() {
     if (movement().levelTimer) segaLevelTimer++;
     // ARE: a locked piece has been in the board since the last drop; hold the
     // game still for areTicks so a held direction can be released before the
-    // next piece appears. Input during the pause is ignored.
+    // next piece appears. Input during the pause is ignored, unless the movement
+    // lets input cancel the pause (Tetris DX), in which case an action key brings
+    // the next piece in at once and takes its request with it.
     if (areTicks > 0) {
+        if (areCanBeCancelled() && playerIsInputting()) {
+            areTicks = 0
+            genNextBlock()
+            beginEntryHold()
+            draw()
+            return
+        }
         areTicks--
         if (areTicks === 0) {
             requestQueue = []
             genNextBlock()
+            beginEntryHold()
             draw()
         }
         return
@@ -995,13 +1097,31 @@ function gameTick() {
     // Held directions queue their repeats before gravity, so the player's move
     // lands in the same frame and ahead of the automatic drop.
     processHeldDirs();
+    // Tetris DX's entry delay: the piece has just appeared and gravity leaves it
+    // alone for a moment. The player can already move, turn or soft drop it, and
+    // any of those ends the delay at once; with no input the first automatic drop
+    // comes when the delay runs out, not one falling interval later.
+    var gravityHeld = false;
+    if (entryHoldLeft > 0) {
+        if (playerIsInputting()) {
+            entryHoldLeft = 0;
+            dropTicks = 0;
+        } else {
+            entryHoldLeft--;
+            gravityHeld = true;
+            if (entryHoldLeft === 0) requestQueue.push(REQUEST.AUTO_DOWN);
+        }
+    }
     // The difficulty picks the falling curve. Accelerating curves (Modern, the
     // Custom scale) ask for a fraction of a row per tick or for several rows;
     // only whole rows are dropped and the fraction is kept for the next tick,
     // so 20G moves 20 cells in one frame. The discrete curves drop whole cells
     // on a fixed frame cadence instead.
     var gravityCfg = difficulty().gravity;
-    if (gravityCfg.cellsPerTick) {
+    if (gravityHeld) {
+        // Either the entry delay is still running or the drop that ends it is
+        // already queued: gravity adds nothing to the frame.
+    } else if (gravityCfg.cellsPerTick) {
         // 20G and above is clamped to 25 rows a frame; the piece then lands on
         // the spawn tick instead of creeping down from above the field.
         gravityDemand += clampGravitySpeed(gravityCfg.cellsPerTick(level));
@@ -1012,8 +1132,8 @@ function gameTick() {
             gravityDemand -= rows;
             if (gravityDemand < GRAVITY_EPSILON) gravityDemand = 0;
         }
-        if (requestQueue.indexOf(4) < 0) {
-            for (var r = 0; r < rows; r++) requestQueue.push(5);
+        if (!softDropQueued()) {
+            for (var r = 0; r < rows; r++) requestQueue.push(REQUEST.AUTO_DOWN);
         }
     } else {
         dropTicks++;
@@ -1023,9 +1143,9 @@ function gameTick() {
             dropTicks = 0;
             // A manual drop queued for this tick consumes the slot, so the
             // piece never falls two cells in one tick.
-            if (requestQueue.indexOf(4) < 0) {
+            if (!softDropQueued()) {
                 var cells = gravityCfg.cellsPerDrop ? gravityCfg.cellsPerDrop(level) : 1;
-                for (var c = 0; c < cells; c++) requestQueue.push(5);
+                for (var c = 0; c < cells; c++) requestQueue.push(REQUEST.AUTO_DOWN);
             }
         }
     }
@@ -1085,6 +1205,9 @@ function startGame() {
     var rsBox = document.getElementById("randomStartCheckbox");
     if (rsBox) randomStartEnabled = !!rsBox.checked;
 
+    var lsdBox = document.getElementById("lockingSoftDropCheckbox");
+    if (lsdBox) lockingSoftDropEnabled = !!lsdBox.checked;
+
     GameStopped = false
     gameStarted = true
     // The configuration is fixed for the whole game, including the game-over
@@ -1106,6 +1229,7 @@ function resetGame() {
     areTicks = 0
     gravityDemand = 0
     lockTicks = 0
+    entryHoldLeft = 0
     initBoard()
     currentBlock = []
     nextBlock = []
@@ -1222,7 +1346,7 @@ function setConfigEnabled(enabled) {
     var row = document.getElementById("configRow");
     if (row && !enabled) row.style.display = "none";
     var ids = ["randomizerSelect", "rotationSystemSelect", "seedInput", "randomStartCheckbox",
-        "movementSelect", "difficultySelect", "startLevelInput"];
+        "movementSelect", "difficultySelect", "startLevelInput", "lockingSoftDropCheckbox"];
     for (var i = 0; i < ids.length; i++) {
         var el = document.getElementById(ids[i]);
         if (el) el.disabled = !enabled;
@@ -1269,6 +1393,18 @@ function setRandomStart(enabled) {
         return;
     }
     randomStartEnabled = !!enabled;
+    refreshStatsIfVisible();
+}
+
+// Locking Soft Drop: whether the repeats a held down key generates may lock a
+// resting piece. The panel keeps the player's choice for the next game.
+function setLockingSoftDrop(enabled) {
+    var box = document.getElementById("lockingSoftDropCheckbox");
+    if (gameStarted) {
+        if (box) box.checked = lockingSoftDropEnabled;
+        return;
+    }
+    lockingSoftDropEnabled = !!enabled;
     refreshStatsIfVisible();
 }
 
@@ -1495,6 +1631,10 @@ function refreshStats() {
         if (difficulty().name !== "Default" && movement().name !== "Raw") movementText += " (" + difficulty().name + ")";
         movementEl.textContent = movementText;
     }
+    var lsd = document.getElementById("statsLockingSoftDrop");
+    if (lsd) {
+        lsd.textContent = "Locking Soft Drop: " + (lockingSoftDropEnabled ? "On" : "Off");
+    }
     if (ss) {
         if (isCustomDifficulty()) {
             if (gameStartLevel >= 60) {
@@ -1568,31 +1708,31 @@ function revealSeed() {
 //#region Input
 
 // Action requests shared by the keyboard listener and the on-screen buttons.
-// Each queues a code for calcNext() and caps the queue at 8 entries.
+// Each queues one action for calcNext(), up to a limit that keeps a burst of key
+// repeat from spending a single frame on an unbounded number of moves.
+function queueRequest(request) {
+    if (GameStopped || requestQueue.length >= REQUEST_QUEUE_LIMIT) return
+    requestQueue.push(request)
+}
 
 function requestUp() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(3)
+    queueRequest(REQUEST.ROTATE_CW)
 }
 
 function requestRotateCCW() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(6)
+    queueRequest(REQUEST.ROTATE_CCW)
 }
 
-function requestDown() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(4)
+function requestDown(repeat) {
+    queueRequest(repeat ? REQUEST.DOWN_REPEAT : REQUEST.DOWN)
 }
 
 function requestLeft() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(1)
+    queueRequest(REQUEST.LEFT)
 }
 
 function requestRight() {
-    if (GameStopped || requestQueue.length >= 8) return
-    requestQueue.push(2)
+    queueRequest(REQUEST.RIGHT)
 }
 
 // Queue one movement for a held direction; picked up by calcNext() this tick.
@@ -1678,7 +1818,9 @@ function processHeldDirs() {
 
     if (heldDirs.down.pressed) {
         heldDirs.down.ticks++
-        if (heldDirs.down.ticks % softDropTicks() === 0) requestDown()
+        // The press itself already queued a real drop; the repeats that follow
+        // are weaker: they move the piece but never lock it.
+        if (heldDirs.down.ticks % softDropTicks() === 0) requestDown(true)
     }
 
     // Modern's Tetris Worlds difficulties repeat rotation while the key is
@@ -1809,6 +1951,10 @@ window.onload = function init() {
     currentScale = globalScale;
 
     refreshWallKickAvailability();
+    // The browser may restore the checkbox states on a reload; the stats panel
+    // reads the setting before a game starts, so sync it here too.
+    var lsdBox = document.getElementById("lockingSoftDropCheckbox");
+    if (lsdBox) lockingSoftDropEnabled = !!lsdBox.checked;
     refreshDifficultyOptions();
     refreshStartLevelField();
     setCanvas();
@@ -1841,9 +1987,11 @@ document.onkeydown = function keydown(evt) {
     evt.preventDefault();
     // Raw movement trusts the operating system's key repeat: every keydown,
     // the first and each repeated one, queues exactly one action. This is the
-    // old version's feel; no DAS or ARR is involved.
+    // old version's feel; no DAS or ARR is involved. The repeats of a held down
+    // key are queued as repeats so that they cannot lock the piece.
     if (movement().nativeRepeat) {
-        queueHeldMove(action);
+        if (action === "down" && evt.repeat) requestDown(true);
+        else queueHeldMove(action);
         return;
     }
     // The other movements ignore the repeat flag: auto-shift generates the

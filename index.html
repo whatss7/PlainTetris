@@ -98,6 +98,7 @@
                         <option value="7-bag" selected>7-bag</option>
                         <option value="nes">NES</option>
                         <option value="gb">Game Boy</option>
+                        <option value="tdx">Tetris DX</option>
                         <option value="sega">Sega</option>
                         <option value="tgm">Arika TGM</option>
                         <option value="tgm2">Arika TGM2</option>
@@ -119,6 +120,7 @@
                         <option value="srs" selected>SRS</option>
                         <option value="nes">NES</option>
                         <option value="gb">Game Boy</option>
+                        <option value="tdx">Tetris DX</option>
                         <option value="sega">Sega</option>
                         <option value="arika">Arika</option>
                         <option value="tgm3">Arika TGM3</option>
@@ -135,6 +137,7 @@
                         <option value="modern" selected>Modern</option>
                         <option value="nes">NES</option>
                         <option value="gb">Game Boy</option>
+                        <option value="tdx">Tetris DX</option>
                         <option value="sega">Sega</option>
                         <option value="tgm">Arika TGM</option>
                         <option value="tgm2">Arika TGM2</option>
@@ -144,6 +147,9 @@
                     </select>
                 </label>
                 <a>|</a>
+                <label><input type="checkbox" id="lockingSoftDropCheckbox" onchange="setLockingSoftDrop(this.checked)"/> Locking Soft Drop</label>
+            </div>
+            <div>
                 <label>Difficulty:
                     <select id="difficultySelect" onchange="setDifficulty(this.value); this.blur()">
                         <option value="default" selected>Default</option>
@@ -181,6 +187,7 @@
         <div id="statsRandomizer"></div>
         <div id="statsRotationSystem"></div>
         <div id="statsMovement"></div>
+        <div id="statsLockingSoftDrop"></div>
         <div id="statsStartLevel"></div>
         <div id="statsSeed"></div>
         <div id="statsScore"></div>

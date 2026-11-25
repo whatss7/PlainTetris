@@ -148,6 +148,34 @@ var wallKickT64_I = makeWallKickTableFromBasicRotation(basicRotationT64_I, t64Ki
 var wallKickT64_O = makeWallKickTableFromBasicRotation(basicRotationT64_O, t64KickTable);
 var wallKickT64_Default = makeWallKickTableFromBasicRotation(wallKickNone, t64KickTable);
 
+// Tetris DX: a turn is first tried about the center of the piece's bounding box
+// (as in SRS) and then about an alternate center one cell away from it. That
+// alternate center sits on the side the piece's bulk is on, so in the frame of
+// the piece it always points from the box center towards the filled rows (or,
+// for the I, to the mirrored point on the other side of its row). Because the
+// offset turns with the piece, turning about it moves the piece by
+// d(from) - d(to): one cell sideways and always one cell up. That lift is the
+// documented wall climb.
+var tetrisDxAltCenter = { "0": [0, 1], "R": [1, 0], "2": [0, -1], "L": [-1, 0] };
+
+// Build the eight transitions from the alternate centers of the four states:
+// the plain turn is the first candidate, the alternate center the second.
+function makeTetrisDxKickTable() {
+    var states = ["0", "R", "2", "L"];
+    var table = {};
+    for (var i = 0; i < states.length; i++) {
+        var from = states[i];
+        var to = states[(i + 1) % states.length];
+        var dFrom = tetrisDxAltCenter[from];
+        var dTo = tetrisDxAltCenter[to];
+        table[from + "->" + to] = [[0, 0], [dFrom[0] - dTo[0], dFrom[1] - dTo[1]]];
+        table[to + "->" + from] = [[0, 0], [dTo[0] - dFrom[0], dTo[1] - dFrom[1]]];
+    }
+    return table;
+}
+
+var wallKickTetrisDx = makeTetrisDxKickTable();
+
 // Wall kick tables used by each rotation system
 var WALL_KICK_TABLES = {
     "srs": {
@@ -166,6 +194,10 @@ var WALL_KICK_TABLES = {
         "S": wallKickGB_ISZ,
         "Z": wallKickGB_ISZ,
         "default": wallKickNone
+    },
+    "tdx": {
+        "O": wallKickNone,
+        "default": wallKickTetrisDx,
     },
     "sega": {
         "I": wallKickSega_I,
@@ -211,6 +243,7 @@ var ROTATION_SYSTEM_NAMES = {
     "srs": "SRS",
     "nes": "NES",
     "gb": "Game Boy",
+    "tdx": "Tetris DX",
     "sega": "Sega",
     "arika": "Arika",
     "tgm3": "Arika TGM3",
@@ -285,8 +318,19 @@ var ROTATION_RULES = {
 
 var ROTATION_SYSTEM_RULES = {
     "arika": { blockAfterFirst: ["centerColumnRule"] },
-    "tgm3": { blockAfterFirst: ["centerColumnRule"], allowKick: "tgm3IKickRule" }
+    "tgm3": { blockAfterFirst: ["centerColumnRule"], allowKick: "tgm3IKickRule" },
+    // Tetris DX's alternate center restarts the gravity timer on top of moving
+    // the piece, which is what makes its infinity exploit possible.
+    "tdx": { kickResetsGravity: true }
 };
+
+// Whether a kick other than the plain box-center turn restarts the gravity
+// timer. That is Tetris DX's alternate center: turning about it hangs the piece
+// where it is instead of letting it fall straight away.
+function rotationSystemKickResetsGravity() {
+    var system = ROTATION_SYSTEM_RULES[gameRotationSystemName];
+    return !!(system && system.kickResetsGravity);
+}
 
 function rotationRulesBlockKick(type, block, x, y) {
     var system = ROTATION_SYSTEM_RULES[gameRotationSystemName];
@@ -382,6 +426,7 @@ var SPAWN_STATES_BY_SYSTEM = {
     "srs": { "default": "0" },
     "nes": { "default": "2" },
     "gb": { "default": "2" },
+    "tdx": { "default": "0", "J": "2", "L": "2", "T": "2" },
     "sega": { "default": "2" },
     "arika": { "default": "2" },
     "tgm3": { "default": "2" },
@@ -433,6 +478,7 @@ var SPAWN_LOCATIONS_BY_SYSTEM = {
     "asrs": { "hand": "left", "anchor": "bottom", "row": 20 },
     "nes": { "hand": "right", "anchor": "top", "row": 19 },
     "gb": { "hand": "left", "anchor": "top", "row": 19 },
+    "tdx": { "hand": "left", "anchor": "top", "row": 19 },
     "sega": { "hand": "left", "anchor": "top", "row": 19 },
     "arika": { "hand": "left", "anchor": "top", "row": 19 },
     "tgm3": { "hand": "left", "anchor": "top", "row": 19 },

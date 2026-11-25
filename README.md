@@ -15,6 +15,7 @@ The randomizer config decides the order in which the seven pieces arrive. Every 
 | N-bag | A bag of N pieces is shuffled and dealt in order; a new bag is generated when the last piece of the current one is used. |
 | NES | Rolls 0-7 to choose a piece; if the result is the same as the previous piece or is the dummy value 7, it is rerolled in 0-6. |
 | Game Boy | Pieces are compared as 3-bit vectors; a piece is rerolled while both it and the previous piece are subsets of the piece before the previous one (up to 3 draws). The piece distribution is not uniform. |
+| Tetris DX | A reroll mechanism that has a flaw. The piece distribution is not uniform. |
 | Sega | A 32-bit LCG generates a 1000-piece sequence from the seed; the sequence repeats every 1000 pieces. |
 | Arika TGM | The first piece is I, J, L or T; after that, up to 4 draws are made until the piece is not in the four-piece history. |
 | Arika TGM2 | Same as TGM with a 6-draw limit and a different initial history. |
@@ -32,6 +33,7 @@ Spawn position is part of the rotation system.
 | SRS | Guideline standard. Pure rotation with the full wall kick tables. |
 | NES | Nintendo's rotation system as used on the NES. No wall kicks. |
 | Game Boy | Nintendo's rotation system as used on the Game Boy. No wall kicks. |
+| Tetris DX | The rotation system as used on Tetris DX. It's an early version of what would become SRS. A turn is tried about the box center first and then about a second center one cell off it. |
 | Sega | Sega's 1988 arcade rotation: flat side up and bottom-aligned when rotating. No wall kicks. |
 | Arika | Sega-derived TGM rotation. Right kick is tried first, the I piece never kicks, and a rotation is refused when the first colliding cell of the rotated piece is in the centre column. |
 | Arika TGM3 | Same as Arika, but with additional wall and floor kicks for the I and T pieces. |
@@ -49,6 +51,7 @@ The movement config sets the speed curve and the basic rules that differ between
 | Modern | Guideline movement: 10-frame DAS, 1/2G ARR, 1/2G soft drop, 2-frame ARE, 30-frame lock delay with move reset (rotating in place does not hold the piece), and IRS in Default/Custom or rotation repeat in Tetris Worlds/TW Custom. |
 | NES | 16-frame DAS, 1/6G ARR, 1/2G soft drop, ARE grows from 10 to 18 frames with the lock row, and no lock delay. |
 | Game Boy | 24-frame DAS, 1/9G ARR, 1/3G soft drop, 2-frame ARE, and no lock delay. |
+| Tetris DX | 9-frame DAS, 1/3G ARR, 1/2G soft drop, lock delay and ARE shrinks from 56 to 32 as level increases. ARE is cancellable. |
 | Sega | 20-frame DAS, 1G ARR, 1G soft drop, 30-frame ARE, and a 30-frame lock delay with step reset. |
 | Arika TGM | Tetris The Grand Master movement: 16-frame DAS, 1/2G ARR, 1/2G soft drop, 30-frame ARE, 30-frame lock delay with move reset, and IRS. |
 | Arika TGM2 | Movement system of Tetris The Absolute The Grand Master 2; varies for different game modes. |

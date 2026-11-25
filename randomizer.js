@@ -119,6 +119,51 @@ function createGameBoyRandomizer() {
     };
 }
 
+// Tetris DX (Game Boy Color): pieces are numbered I=0, T=1, Z=2, S=3, J=4,
+// L=5, O=6. A roll of 0-7 picks the next piece, where 7 means "the piece the
+// internal counter stands on". A roll that repeats the previous piece is thrown
+// away and replaced by the re-roll counter, and five re-rolls in a row restart
+// the roll. Because the counter usually lands on 1 (T) first, the result is the
+// documented bias towards T (about 24% T, 14% Z, 12% for the rest).
+var tetrisDxPieceMap = [0, 5, 6, 4, 1, 2, 3];
+
+function createTetrisDxRandomizer() {
+    var lastPiece = -1;
+    var rerollCount = 0;
+    // The counter counts the pieces dealt so far, so the first piece draws 0.
+    var pieceCount = 6;
+    return {
+        next: function () {
+            pieceCount = (pieceCount + 1) % 7;
+            var piece;
+            for (;;) {
+                piece = Math.floor(gameRandom() * 8);
+                if (piece === 7) piece = pieceCount;
+                if (piece !== lastPiece) {
+                    lastPiece = piece;
+                    rerollCount = 0;
+                    break;
+                }
+                // A repeat is replaced by the re-roll counter instead of being
+                // rolled again; the previous piece is left as it was.
+                rerollCount++;
+                piece = rerollCount;
+                if (rerollCount >= 5) {
+                    rerollCount = 0;
+                    continue;
+                }
+                break;
+            }
+            return tetrisDxPieceMap[piece];
+        },
+        reset: function () {
+            lastPiece = -1;
+            rerollCount = 0;
+            pieceCount = 6;
+        }
+    };
+}
+
 // Sega (System 16, 1988): a 32-bit seed generates a 1000-piece sequence that
 // repeats every 1000 pieces. Seed 0 is replaced by a built-in constant, which
 // produces the documented power-on sequence. The seed field accepts decimal or
@@ -285,6 +330,7 @@ var RANDOMIZERS = {
     "7-bag": function () { return createBagRandomizer(7); },
     "nes": createNesRandomizer,
     "gb": createGameBoyRandomizer,
+    "tdx": createTetrisDxRandomizer,
     "sega": createSegaRandomizer,
     "tgm": createTgmRandomizer,
     "tgm2": createTgm2Randomizer,
@@ -299,6 +345,7 @@ var RANDOMIZER_NAMES = {
     "7-bag": "7-bag",
     "nes": "NES",
     "gb": "Game Boy",
+    "tdx": "Tetris DX",
     "sega": "Sega",
     "tgm": "Arika TGM",
     "tgm2": "Arika TGM2",
