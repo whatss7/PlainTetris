@@ -476,4 +476,15 @@ function getNextRotationState(currentRotation) {
     }
 }
 
+// Counter-clockwise state machine (0 -> L -> 2 -> R -> 0)
+function getPreviousRotationState(currentRotation) {
+    switch (currentRotation) {
+        case "0": return "L";
+        case "L": return "2";
+        case "2": return "R";
+        case "R": return "0";
+        default: return "0";
+    }
+}
+
 //#endregion

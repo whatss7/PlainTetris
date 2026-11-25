@@ -645,14 +645,24 @@ var asukaEasyTiming = timingFromBuckets([
 
 // The Custom difficulty carries the old Custom Speed option: it keeps the
 // movement's timing but replaces the falling speed and never levels up.
-function customDifficulty() {
-    return {
+// Overrides let a movement add variants that keep the Custom speed and level
+// behaviour but change one input rule (Modern's TW Custom, for example).
+function customDifficulty(overrides) {
+    var result = {
         id: "custom",
         name: "Custom",
         custom: true,
         noLevelUp: true,
         gravity: { cellsPerTick: customCellsPerTick }
     };
+    if (overrides) {
+        for (var key in overrides) {
+            if (Object.prototype.hasOwnProperty.call(overrides, key)) {
+                result[key] = overrides[key];
+            }
+        }
+    }
+    return result;
 }
 
 // Fixed-level practice variant of one arcade mode. It freezes the level (no
@@ -681,7 +691,8 @@ function customModeDifficulty(base) {
 var MOVEMENT_DEFINITIONS = {
     modern: {
         name: "Modern",
-        das: 10, arr: 2, softDrop: 2, rotate: 2,
+        das: 10, arr: 2, softDrop: 2, rotate: 0,
+        irs: true,
         are: 2,
         lockDelay: { ticks: 30, reset: "move" },
         startLevel: { min: 1, max: 19, default: 1 },
@@ -690,7 +701,12 @@ var MOVEMENT_DEFINITIONS = {
         defaultDifficulty: "default",
         difficulties: [
             { id: "default", name: "Default", gravity: { cellsPerTick: modernCellsPerTick } },
-            customDifficulty()
+            customDifficulty(),
+            {
+                id: "tw", name: "Tetris Worlds", rotate: 2, irs: false,
+                gravity: { cellsPerTick: modernCellsPerTick }
+            },
+            customDifficulty({ id: "tw-custom", name: "TW Custom", rotate: 2, irs: false })
         ]
     },
     nes: {
@@ -758,7 +774,8 @@ var MOVEMENT_DEFINITIONS = {
     },
     tgm: {
         name: "Arika TGM",
-        das: 16, arr: 2, softDrop: 2, rotate: 2,
+        das: 16, arr: 2, softDrop: 2, rotate: 0,
+        irs: true,
         are: 30,
         lockDelay: { ticks: 30, reset: "move" },
         startLevel: { min: 0, max: 999, default: 0 },
@@ -773,16 +790,17 @@ var MOVEMENT_DEFINITIONS = {
     },
     tgm2: {
         name: "Arika TGM2",
-        das: 16, arr: 2, softDrop: 2, rotate: 2,
+        das: 16, arr: 2, softDrop: 2, rotate: 0,
+        irs: true,
         are: 27,
         lockDelay: { ticks: 30, reset: "move" },
         startLevel: { min: 0, max: 999, default: 0 },
         // TGM2 counts pieces and lines like TGM1; Normal caps the counter at 300.
         firstLevelLine: function () { return Infinity; },
         levelUp: tgm2LevelUp,
-        // The three arcade modes are the difficulties; Master is the standard.
+        // The three arcade modes are the difficulties; Normal is the standard.
         // Each mode also has a Custom practice variant that freezes the level.
-        defaultDifficulty: "master",
+        defaultDifficulty: "normal",
         difficulties: (function () {
             var normal = {
                 id: "normal", name: "Normal", levelCap: 300,
@@ -809,7 +827,8 @@ var MOVEMENT_DEFINITIONS = {
     },
     tgm3: {
         name: "Arika TGM3",
-        das: 16, arr: 2, softDrop: 2, rotate: 2,
+        das: 16, arr: 2, softDrop: 2, rotate: 0,
+        irs: true,
         are: 27,
         lockDelay: { ticks: 30, reset: "move" },
         startLevel: { min: 0, max: 1300, default: 0 },
@@ -817,9 +836,9 @@ var MOVEMENT_DEFINITIONS = {
         // Master and Shirase, so there is no line threshold.
         firstLevelLine: function () { return Infinity; },
         levelUp: tgm3LevelUp,
-        // The three arcade modes are the difficulties; Master is the standard.
+        // The three arcade modes are the difficulties; Easy is the standard.
         // Each mode also has a Custom practice variant that freezes the level.
-        defaultDifficulty: "master",
+        defaultDifficulty: "easy",
         difficulties: (function () {
             var easy = {
                 id: "easy", name: "Easy", levelCap: 200,
@@ -846,7 +865,8 @@ var MOVEMENT_DEFINITIONS = {
     },
     tgm4: {
         name: "Arika TGM4",
-        das: 16, arr: 2, softDrop: 2, rotate: 2,
+        das: 16, arr: 2, softDrop: 2, rotate: 0,
+        irs: true,
         are: 32,
         lockDelay: { ticks: 30, reset: "move" },
         startLevel: { min: 0, max: 2600, default: 0 },
@@ -1017,8 +1037,21 @@ function softDropTicks() {
 }
 
 // Ticks between repeated rotations while rotate is held; 0 means no auto-repeat.
+// A difficulty may override the movement's interval (Modern's Tetris Worlds
+// modes repeat, its Default/Custom modes do not).
 function rotateTicks() {
+    var d = difficulty();
+    if (typeof d.rotate !== "undefined") return d.rotate;
     return movement().rotate || 0;
+}
+
+// Whether a rotate key held through the ARE pause changes the next spawn's
+// orientation. As with the other per-difficulty input rules, the difficulty
+// wins and the movement supplies the default.
+function initialRotationEnabled() {
+    var d = difficulty();
+    if (typeof d.irs !== "undefined") return !!d.irs;
+    return !!movement().irs;
 }
 
 function lockDelay() {

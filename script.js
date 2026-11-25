@@ -39,11 +39,14 @@ var heldDirs = {
     left: { pressed: false, ticks: 0 },
     right: { pressed: false, ticks: 0 },
     down: { pressed: false, ticks: 0 },
-    rotate: { pressed: false, ticks: 0 }
+    rotate: { pressed: false, ticks: 0 },
+    rotateCCW: { pressed: false, ticks: 0 }
 };
 // The most recently pressed of left/right; decides which side wins when both
 // are held down at once.
 var lastHeldDir = null;
+// The most recently pressed of rotate/rotateCCW, used when both are held.
+var lastHeldRotateDir = null;
 var line = 0;
 var score = 0;
 var GameStopped = false;
@@ -411,6 +414,19 @@ function rotateClockwise(block) {
     return newBlock;
 }
 
+function rotateCounterClockwise(block) {
+    var newBlock = []
+    var blockSize = block.length
+
+    for (var i = 0; i < blockSize; i++) {
+        newBlock.push([])
+        for (var j = 0; j < blockSize; j++) {
+            newBlock[i].push(block[j][blockSize - 1 - i])
+        }
+    }
+    return newBlock;
+}
+
 function copyMatrix(dst, src) {
     for (var i = 0; i < src.length; i++) {
         dst.push([])
@@ -520,78 +536,119 @@ function tryMove(dx, dy) {
     return result
 }
 
-function tryRotate() {
+// Search the wall kick table for the first placement of `block` that fits when
+// it is rotated from `fromState` to `toState`. Returns null when no candidate
+// fits. The caller owns the board: the current piece must not be on it.
+function findRotationPlacement(block, baseX, baseY, fromState, toState) {
+    var kickData = getWallKickTable();
+    var kickKey = fromState + "->" + toState;
+    var kicks = kickData ? kickData[kickKey] : null;
+    if (!kicks) return null; // a hand-written table may leave a transition out
+    // With wall kicks disabled only the first offset of the transition is used.
+    if (!wallKickEnabled && kicks.length > 1) kicks = [kicks[0]];
+
+    for (var k = 0; k < kicks.length; k++) {
+        var kick = kicks[k];
+        var x = baseX + kick[0];
+        var y = baseY + kick[1];
+
+        // Some systems make a kick conditional (TGM3's I-piece kicks); skip it
+        // before spending a collision test on it. The index is the position in
+        // the table, which is what the rule uses to tell the groups apart.
+        if (!rotationRulesAllowKick(currentBlockType, block, x, y, k)) {
+            gameLog("Kick " + k + " not allowed for this rotation.");
+            continue;
+        }
+
+        if (testBlockPlace(block, x, y)) {
+            return { block: block, x: x, y: y, kick: kick, rotation: toState, index: k };
+        }
+
+        if (k === 0 && rotationRulesBlockKick(currentBlockType, block, x, y)) {
+            gameLog("Rotation blocked by rotation rule after the first kick failed.");
+            break;
+        }
+    }
+    return null;
+}
+
+function tryRotate(direction) {
+    direction = direction === "ccw" ? "ccw" : "cw";
     // Calculate the new shape of the block
-    var newBlock = rotateClockwise(currentBlock);
+    var newBlock = direction === "ccw"
+        ? rotateCounterClockwise(currentBlock)
+        : rotateClockwise(currentBlock);
     // Cells the piece occupies before the turn; a rotation only counts as a
     // move for the lock timer when this changes.
     var cellsBefore = pieceCellsKey(currentBlock, cx, cy);
 
     deleteCurrentFromBoard();
 
-    var kickData = getWallKickTable();
     var currentRotation = getRotationState();
-    var nextRotation = getNextRotationState(currentRotation);
+    var nextRotation = direction === "ccw"
+        ? getPreviousRotationState(currentRotation)
+        : getNextRotationState(currentRotation);
     var kickKey = currentRotation + "->" + nextRotation;
+    var kickData = getWallKickTable();
     var kicks = kickData ? kickData[kickKey] : null;
-    var result = false;
-    if (!kicks) { // a hand-written table may leave a transition out
-        addCurrentToBoard();
-        return false;
-    }
-    // With wall kicks disabled only the first offset of the transition is used.
-    if (!wallKickEnabled && kicks.length > 1) kicks = [kicks[0]];
     gameLog("Attempting rotation.");
+    gameLog("Direction: " + direction);
     gameLog("Current rotation: " + currentRotation);
     gameLog("Next rotation: " + nextRotation);
     gameLog("Kick key: " + kickKey);
     gameLog("Block type: " + currentBlockType);
     gameLog("Kicks: " + JSON.stringify(kicks));
 
-    for (var k = 0; k < kicks.length; k++) {
-        var kick = kicks[k];
-        var tempPos = [cx + kick[0], cy + kick[1]];
-
-        // Some systems make a kick conditional (TGM3's I-piece kicks); skip it
-        // before spending a collision test on it. The index is the position in
-        // the table, which is what the rule uses to tell the groups apart.
-        if (!rotationRulesAllowKick(currentBlockType, newBlock, tempPos[0], tempPos[1], k)) {
-            gameLog("Kick " + k + " not allowed for this rotation.");
-            continue;
+    var placement = findRotationPlacement(newBlock, cx, cy, currentRotation, nextRotation);
+    var result = false;
+    if (placement) {
+        currentBlock = placement.block;
+        cx = placement.x;
+        cy = placement.y;
+        currentRotationState = placement.rotation;
+        lastKickOffset = [placement.kick[0], placement.kick[1]];
+        lastActionWasRotation = true;
+        // Move-reset curves restart the lock delay on a successful turn,
+        // but only when the turn actually changes the occupied cells: an O
+        // piece turning in place must not keep the timer alive. Step-reset
+        // curves only do it when the piece steps downward.
+        var lockCfg = lockDelay();
+        if (lockCfg && lockCfg.reset === "move" &&
+            pieceCellsKey(currentBlock, cx, cy) !== cellsBefore) {
+            lockTicks = 0;
         }
-
-        if (testBlockPlace(newBlock, tempPos[0], tempPos[1])) {
-            currentBlock = newBlock;
-            cx = tempPos[0];
-            cy = tempPos[1];
-            currentRotationState = getNextRotationState(currentRotationState);
-            lastKickOffset = [kick[0], kick[1]];
-            lastActionWasRotation = true;
-            // Move-reset curves restart the lock delay on a successful turn,
-            // but only when the turn actually changes the occupied cells: an O
-            // piece turning in place must not keep the timer alive. Step-reset
-            // curves only do it when the piece steps downward.
-            var lockCfg = lockDelay();
-            if (lockCfg && lockCfg.reset === "move" &&
-                pieceCellsKey(currentBlock, cx, cy) !== cellsBefore) {
-                lockTicks = 0;
-            }
-            result = true;
-            gameLog("Rotation successful.");
-            gameLog("New position: (" + cx + ", " + cy + ")");
-            gameLog("New rotation: " + currentRotationState);
-            gameLog("Used kick: " + JSON.stringify(kick));
-            break;
-        }
-
-        if (k === 0 && rotationRulesBlockKick(currentBlockType, newBlock, tempPos[0], tempPos[1])) {
-            gameLog("Rotation blocked by rotation rule after the first kick failed.");
-            break;
-        }
+        result = true;
+        gameLog("Rotation successful.");
+        gameLog("New position: (" + cx + ", " + cy + ")");
+        gameLog("New rotation: " + currentRotationState);
+        gameLog("Used kick: " + JSON.stringify(placement.kick));
     }
-    
+
     addCurrentToBoard();
     return result;
+}
+
+// IRS: rotate the newly spawned piece before it enters the board. The rotated
+// shape gets its own spawn origin (the rotation rules decide where that is),
+// then the wall kick table is tried in order. Returns false and leaves the
+// unrotated spawn untouched when no candidate fits.
+function tryInitialRotation(direction) {
+    if (!currentBlock || currentBlock.length === 0) return false;
+    var fromState = getSpawnState(currentBlockType);
+    var toState = direction === "ccw"
+        ? getPreviousRotationState(fromState)
+        : getNextRotationState(fromState);
+    var rotated = direction === "ccw"
+        ? rotateCounterClockwise(currentBlock)
+        : rotateClockwise(currentBlock);
+    var origin = getSpawnOrigin(rotated);
+    var placement = findRotationPlacement(rotated, origin[0], origin[1], fromState, toState);
+    if (!placement) return false;
+    currentBlock = placement.block;
+    cx = placement.x;
+    cy = placement.y;
+    currentRotationState = placement.rotation;
+    return true;
 }
 
 // Board setup and the game loop
@@ -639,7 +696,7 @@ function initGame() {
     gravityDemand = 0
     lockTicks = 0
     resetLevel()
-    IDrought = 0
+    iDrought = 0
     maxIDrought = 0
     stats = { single: 0, double: 0, triple: 0, tetris: 0 }
     tSpinStats = { single: 0, double: 0, triple: 0, miniSingle: 0, miniDouble: 0 }
@@ -833,6 +890,21 @@ function genNextBlock() {
     document.getElementById("score").textContent = score.toString();
     document.getElementById("count").textContent = line.toString();
 
+    // IRS: a rotation key held through the ARE pause changes the piece's spawn
+    // orientation. The state is set first because the rotation rules and the
+    // normal rotation path read it; tryInitialRotation() overwrites it only when
+    // a kicked placement fits.
+    currentRotationState = getSpawnState(currentBlockType);
+    if (!initialSpawnPhase && initialRotationEnabled()) {
+        var initialRotation = heldRotationAction();
+        if (initialRotation) {
+            var initialDirection = initialRotation === "rotateCCW" ? "ccw" : "cw";
+            if (tryInitialRotation(initialDirection)) {
+                heldDirs[initialRotation].ticks = 0;
+            }
+        }
+    }
+
     // Two things end the game here, both checked after the clear so a line
     // clearing under a stack can still rescue it. Lock out: a block is left in
     // the hidden rows above the field. Block out: the new piece cannot be
@@ -844,7 +916,6 @@ function genNextBlock() {
     var spawnFits = blockSize === 0 || testBlockPlace(currentBlock, cx, cy, board);
     if (blockSize > 0) recordSpawn(currentBlockType);
     addBlockToBoard(board, currentBlock, cx, cy);
-    currentRotationState = getSpawnState(currentBlockType);
 
     if (lockOut || !spawnFits) {
         if (lockOut) gameLog("Lock out: a block was left above the visible field.");
@@ -864,7 +935,7 @@ function genNextBlock() {
     refreshStatsIfVisible();
 }
 
-// 1 left 2 right 3 up 4 down 5 auto-down
+// 1 left 2 right 3 rotate CW 4 down 5 auto-down 6 rotate CCW
 function calcNext() {
     if (GameStopped) return
     requestQueue.forEach(i => {
@@ -876,7 +947,9 @@ function calcNext() {
         } else if (i == 2) {
             tryMove(1, 0)
         } else if (i == 3) {
-            tryRotate()
+            tryRotate("cw")
+        } else if (i == 6) {
+            tryRotate("ccw")
         } else if (i == 4) {
             if (tryMove(0, -1)) {
                 // A manual drop restarts gravity.
@@ -1043,7 +1116,7 @@ function resetGame() {
     line = 0
     score = 0
     currentRotationState = "0"
-    IDrought = 0
+    iDrought = 0
     maxIDrought = 0
     stats = { single: 0, double: 0, triple: 0, tetris: 0 }
     tSpinStats = { single: 0, double: 0, triple: 0, miniSingle: 0, miniDouble: 0 }
@@ -1347,16 +1420,16 @@ function recordTSpin(kind, lineCount) {
 }
 
 var pieceCounts = { I: 0, J: 0, L: 0, O: 0, S: 0, T: 0, Z: 0 };
-var IDrought = 0;
+var iDrought = 0;
 var maxIDrought = 0;
 
 function recordSpawn(type) {
     if (pieceCounts.hasOwnProperty(type)) pieceCounts[type]++;
     if (type === "I") {
-        IDrought = 0;
+        iDrought = 0;
     } else {
-        IDrought++;
-        if (IDrought > maxIDrought) maxIDrought = IDrought;
+        iDrought++;
+        if (iDrought > maxIDrought) maxIDrought = iDrought;
     }
 }
 
@@ -1419,7 +1492,7 @@ function refreshStats() {
         (kickDisabled ? " (no wall kick)" : "");
     if (movementEl) {
         var movementText = "Movement: " + movement().name;
-        if (difficulty().name !== "Default") movementText += " (" + difficulty().name + ")";
+        if (difficulty().name !== "Default" && movement().name !== "Raw") movementText += " (" + difficulty().name + ")";
         movementEl.textContent = movementText;
     }
     if (ss) {
@@ -1472,7 +1545,7 @@ function refreshStats() {
         "  L: " + pieceCounts.L + "  O: " + pieceCounts.O +
         "  S: " + pieceCounts.S + "  T: " + pieceCounts.T +
         "  Z: " + pieceCounts.Z;
-    if (streak) streak.textContent = "I Drought: " + IDrought + "  Max: " + maxIDrought;
+    if (streak) streak.textContent = "I Drought: " + iDrought + "  Max: " + maxIDrought;
     if (!counts || !rate) return;
     counts.textContent = "Single: " + stats.single + "  Double: " + stats.double +
         "  Triple: " + stats.triple + "  Tetris: " + stats.tetris;
@@ -1502,6 +1575,11 @@ function requestUp() {
     requestQueue.push(3)
 }
 
+function requestRotateCCW() {
+    if (GameStopped || requestQueue.length >= 8) return
+    requestQueue.push(6)
+}
+
 function requestDown() {
     if (GameStopped || requestQueue.length >= 8) return
     requestQueue.push(4)
@@ -1522,7 +1600,8 @@ function queueHeldMove(dir) {
     if (dir === "left") requestLeft()
     else if (dir === "right") requestRight()
     else if (dir === "rotate") requestUp()
-    else requestDown()
+    else if (dir === "rotateCCW") requestRotateCCW()
+    else if (dir === "down") requestDown()
 }
 
 // Pressing a direction always moves once right away; the repeat comes later.
@@ -1533,6 +1612,7 @@ function pressDir(dir) {
     state.pressed = true
     state.ticks = 0
     if (dir === "left" || dir === "right") lastHeldDir = dir
+    if (dir === "rotate" || dir === "rotateCCW") lastHeldRotateDir = dir
     queueHeldMove(dir)
 }
 
@@ -1544,17 +1624,33 @@ function releaseDir(dir) {
     if (lastHeldDir === dir) {
         lastHeldDir = heldDirs.right.pressed ? "right" : (heldDirs.left.pressed ? "left" : null)
     }
+    if (lastHeldRotateDir === dir) {
+        lastHeldRotateDir = heldDirs.rotateCCW.pressed ? "rotateCCW" :
+            (heldDirs.rotate.pressed ? "rotate" : null)
+    }
+}
+
+// The rotate key that wins when both are held: the one pressed last. Also used
+// by IRS, which reads the same held state at the end of the ARE pause.
+function heldRotationAction() {
+    if (heldDirs.rotate.pressed && heldDirs.rotateCCW.pressed) {
+        return lastHeldRotateDir || "rotate"
+    }
+    if (heldDirs.rotate.pressed) return "rotate"
+    if (heldDirs.rotateCCW.pressed) return "rotateCCW"
+    return null
 }
 
 // Drop every held direction. Needed on pause, game over, focus loss and when
 // the on-screen buttons are rebuilt: a lost keyup/pointerup would otherwise
 // keep the piece moving forever.
 function releaseAllDirs() {
-    ["left", "right", "down", "rotate"].forEach(function (dir) {
+    ["left", "right", "down", "rotate", "rotateCCW"].forEach(function (dir) {
         heldDirs[dir].pressed = false
         heldDirs[dir].ticks = 0
     })
     lastHeldDir = null
+    lastHeldRotateDir = null
 }
 
 // Turn the currently held directions into queued moves for this tick.
@@ -1585,15 +1681,18 @@ function processHeldDirs() {
         if (heldDirs.down.ticks % softDropTicks() === 0) requestDown()
     }
 
-    // Modern and the TGM series repeat rotation while the key is held. It uses
-    // the same shape as DAS: nothing repeats until the charge has elapsed, then
-    // one rotation every rotateTicks(). Rotating restarts the lock delay, so
-    // holding rotate is how a piece is kept alive at high speed.
-    if (heldDirs.rotate.pressed && rotateTicks() > 0) {
-        heldDirs.rotate.ticks++
+    // Modern's Tetris Worlds difficulties repeat rotation while the key is
+    // held. It uses the same shape as DAS: nothing repeats until the charge
+    // has elapsed, then one rotation every rotateTicks(). Rotating restarts
+    // the lock delay, so holding rotate is how a piece is kept alive at high
+    // speed.
+    var rotateDir = heldRotationAction()
+    if (rotateDir && rotateTicks() > 0) {
+        var rotateState = heldDirs[rotateDir]
+        rotateState.ticks++
         var rotateCharge = dasTicks()
-        if (heldDirs.rotate.ticks >= rotateCharge &&
-            (heldDirs.rotate.ticks - rotateCharge) % rotateTicks() === 0) requestUp()
+        if (rotateState.ticks >= rotateCharge &&
+            (rotateState.ticks - rotateCharge) % rotateTicks() === 0) queueHeldMove(rotateDir)
     }
 }
 
@@ -1719,13 +1818,19 @@ window.onload = function init() {
     if(windowWidth < windowHeight) showVirtualBtns();
 };
 
-// Map an arrow key to the input action it triggers.
+// Map a key to the input action it triggers.
 function arrowAction(evt) {
+    // Leave browser shortcuts (Ctrl+Z and friends) alone.
+    if (evt.ctrlKey || evt.metaKey || evt.altKey) return null;
     switch (evt.key) {
         case "ArrowUp": return "rotate";
         case "ArrowDown": return "down";
         case "ArrowLeft": return "left";
         case "ArrowRight": return "right";
+        case "x":
+        case "X": return "rotate";
+        case "z":
+        case "Z": return "rotateCCW";
     }
     return null;
 }

@@ -46,11 +46,11 @@ The movement config sets the speed curve and the basic rules that differ between
 
 | System | Description |
 | --- | --- |
-| Modern | Guideline movement: 10-frame DAS, 1/2G ARR, 1/2G soft drop, 2-frame ARE, 30-frame lock delay with move reset (rotating in place does not hold the piece), and rotation repeats while the key is held. |
+| Modern | Guideline movement: 10-frame DAS, 1/2G ARR, 1/2G soft drop, 2-frame ARE, 30-frame lock delay with move reset (rotating in place does not hold the piece), and IRS in Default/Custom or rotation repeat in Tetris Worlds/TW Custom. |
 | NES | 16-frame DAS, 1/6G ARR, 1/2G soft drop, ARE grows from 10 to 18 frames with the lock row, and no lock delay. |
 | Game Boy | 24-frame DAS, 1/9G ARR, 1/3G soft drop, 2-frame ARE, and no lock delay. |
 | Sega | 20-frame DAS, 1G ARR, 1G soft drop, 30-frame ARE, and a 30-frame lock delay with step reset. |
-| Arika TGM | Tetris The Grand Master movement: 16-frame DAS, 1/2G ARR, 1/2G soft drop, 30-frame ARE, 30-frame lock delay with move reset, and rotation repeats while the key is held. |
+| Arika TGM | Tetris The Grand Master movement: 16-frame DAS, 1/2G ARR, 1/2G soft drop, 30-frame ARE, 30-frame lock delay with move reset, and IRS. |
 | Arika TGM2 | Movement system of Tetris The Absolute The Grand Master 2; varies for different game modes. |
 | Arika TGM3 | Movement system of Tetris The Grand Master 3 Terror-Instinct; varies for different game modes. |
 | Arika TGM4 | Movement system of Tetris The Grand Master 4 Absolute Eye; varies for different game modes. |
@@ -59,8 +59,6 @@ The movement config sets the speed curve and the basic rules that differ between
 Note that a movement system does not imply the corresponding game mode. For example, the Arika TGM4 Master difficulty does not have features from the original game such as Pikii and Cyclone. Some per-game rule details such as TGM4's 8 move / 2 rotation reset limit are also not modelled: this project never imposes a reset limit.
 
 Hard drop, sonic drop and hold are popular in modern Tetris games but are not implemented here: pieces can only be moved sideways, soft-dropped and rotated.
-
-Rotation auto-repeat differs from the TGM arcade games: they do not repeat the rotate key, but this project does. IRS (holding rotate as a piece spawns) is not implemented — pre-rotation would be awkward when rotation only turns clockwise — so the repeat makes up for it.
 
 A "Custom" difficulty replaces the movement's speed curve with a level-controlled fall speed, while Arika TGM2, TGM3 and TGM4 instead offer per-mode "Fixed" variants that freeze the level and keep the mode's own speed and delays.
 

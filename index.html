@@ -146,8 +146,10 @@
                 <a>|</a>
                 <label>Difficulty:
                     <select id="difficultySelect" onchange="setDifficulty(this.value); this.blur()">
-                        <option value="default">Default</option>
-                        <option value="custom" selected>Custom</option>
+                        <option value="default" selected>Default</option>
+                        <option value="custom">Custom</option>
+                        <option value="tw">Tetris Worlds</option>
+                        <option value="tw-custom">TW Custom</option>
                     </select>
                 </label>
                 <a>|</a>
@@ -163,7 +165,7 @@
             <p id="count" class="inline">0</p>
             <p class="inline">Level:</p>
             <p id="level" class="inline">0</p>
-            <p id="controlHint" class="inline">&larr; &rarr; &darr;: Move &uarr;: Rotate</p>
+            <p id="controlHint" class="inline">| &larr; &rarr; &darr;: Move &uarr;ZX: Rotate</p>
         </div>
     </div>
     <div class="container">
